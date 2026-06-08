@@ -153,6 +153,45 @@ body {
     left: 20px;
     max-height: calc(100vh - 40px);
     overflow-y: auto;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 10;
+}
+
+.control-panel.collapsed {
+    transform: translateX(-340px); /* 320px width + 20px left margin */
+}
+
+.panel-toggle-btn {
+    position: absolute;
+    top: 40px;
+    left: 340px; /* 320px width + 20px left margin */
+    width: 30px;
+    height: 50px;
+    background: var(--bg-glass);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-left: none;
+    border-radius: 0 4px 4px 0;
+    color: var(--cyan);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s, color 0.2s;
+    pointer-events: auto;
+    outline: none;
+    z-index: 100;
+}
+
+.panel-toggle-btn.collapsed {
+    left: 0px;
+    border-left: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 0 4px 4px 0;
+}
+
+.panel-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
 }
 
 .panel-section {

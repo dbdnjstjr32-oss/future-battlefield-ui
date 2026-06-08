@@ -80,6 +80,20 @@ const toggleVessels = document.getElementById('toggle-vessels');
 const toggleDataCenter = document.getElementById('toggle-datacenter');
 const toggleSatTrack = document.getElementById('toggle-sattrack');
 
+// Sidebar Panel Collapsing Toggle
+const panelToggle = document.getElementById('panel-toggle');
+const controlPanel = document.querySelector('.control-panel');
+
+panelToggle.addEventListener('click', () => {
+    controlPanel.classList.toggle('collapsed');
+    panelToggle.classList.toggle('collapsed');
+    if (controlPanel.classList.contains('collapsed')) {
+        panelToggle.textContent = '▶';
+    } else {
+        panelToggle.textContent = '◀';
+    }
+});
+
 const pitchValEl = document.getElementById('pitch-val');
 const yawValEl = document.getElementById('yaw-val');
 const fpsCounter = document.getElementById('fps-counter');
