@@ -895,6 +895,11 @@ function render(time) {
         state.scanProgress = (time * 0.0006) % 1.0;
     }
 
+    // Auto camera follow selected target
+    if (selectedDrone) {
+        map.setCenter(selectedDrone.currentCoords);
+    }
+
     // (Lat/Lon grid lines over South Korea removed per design request)
 
     // Recompute altitude pixel scale based on zoom level to prevent perspective jumping during pans
@@ -1049,6 +1054,7 @@ function drawLatLonGrid() {
 
 // Draw organic mesh network connecting each airborne aircraft to its 3 nearest neighbors
 function drawAircraftMesh(time) {
+    if (selectedDrone) return; // Hide mesh connections when a target is locked
     const K = 3; // Max connections per aircraft
 
     // Collect only airborne aircraft
@@ -1262,6 +1268,7 @@ function drawBases() {
 function drawDrones(time) {
     const currentZoom = map.getZoom();
     drones.forEach(d => {
+        if (selectedDrone && selectedDrone.id !== d.id) return; // Hide other aircraft if one is selected
         if (!isAircraftVisibleAtZoom(d, currentZoom)) return; // LOD: hide grounded aircraft when zoomed out
 
         const screenPos = map.project(d.currentCoords);
@@ -1352,6 +1359,7 @@ function drawDrones(time) {
 function drawVessels(time) {
     const currentZoom = map.getZoom();
     vessels.forEach(v => {
+        if (selectedDrone && selectedDrone.id !== v.id) return; // Hide other vessels if one is selected
         if (!isVesselVisibleAtZoom(v, currentZoom)) return; // Level of detail zoom-filtering
 
         const screenPos = map.project(v.currentCoords);
