@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Vector Terrain System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <!-- MapLibre GL CDN -->
+    <script src="https://unpkg.com/maplibre-gl@4.3.0/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@4.3.0/dist/maplibre-gl.css" rel="stylesheet" />
+</head>
+<body>
+    <!-- MapLibre GL Container -->
+    <div id="map"></div>
+
+    <!-- Full-screen 3D terrain canvas overlay -->
+    <canvas id="terrain-canvas"></canvas>
+
+    <!-- Scanline overlays -->
+    <div class="scanlines"></div>
+
+    <!-- UI Overlay container -->
+    <div class="hud-overlay">
+
+        <!-- Sidebar Controller Panel -->
+        <aside class="control-panel">
+            <div class="panel-section">
+                <h2>MAP CONTROLS</h2>
+                
+                <div class="control-group">
+                    <label for="height-scale">ELEVATION (고도 배율)</label>
+                    <input type="range" id="height-scale" min="0" max="150" value="60" step="1">
+                    <span class="val-display" id="height-val">60</span>
+                </div>
+
+                <div class="control-group">
+                    <label for="grid-resolution">RESOLUTION (격자 밀도)</label>
+                    <input type="range" id="grid-resolution" min="10" max="40" value="25" step="1">
+                    <span class="val-display" id="res-val">25 x 25</span>
+                </div>
+
+                <div class="control-group">
+                    <label for="camera-zoom">ZOOM (확대)</label>
+                    <input type="range" id="camera-zoom" min="0.5" max="3.0" value="1.2" step="0.1">
+                    <span class="val-display" id="zoom-val">1.2x</span>
+                </div>
+
+                <div class="control-group">
+                    <label for="auto-rot-speed">AUTO ROTATION SPEED (자동 회전)</label>
+                    <input type="range" id="auto-rot-speed" min="0" max="5" value="1.5" step="0.1">
+                    <span class="val-display" id="speed-val">1.5</span>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>SIMULATION MODULE</h2>
+                <div class="toggle-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-autorot" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span>AUTO-ROTATE (자동 회전 활성)</span>
+                </div>
+
+                <div class="toggle-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-noise-wave">
+                        <span class="slider"></span>
+                    </label>
+                    <span>DYNAMIC WAVE (지각 파동 시뮬레이션)</span>
+                </div>
+
+                <div class="toggle-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-scanline" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span>RADAR SCAN (선형 레이더 스윕)</span>
+                </div>
+
+                <div class="toggle-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-aircraft" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span>AIRCRAFT (항공기 표시)</span>
+                </div>
+
+                <div class="toggle-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-vessels" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span>VESSELS (선박 표시)</span>
+                </div>
+
+                <div class="toggle-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-datacenter" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span>DATA CENTER NET (데이터센터망)</span>
+                </div>
+
+                <div class="toggle-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-sattrack" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span>SATELLITE TRACKS (위성 궤적선)</span>
+                </div>
+            </div>
+
+            <div class="panel-section telemetry-data">
+                <h2>TELEMETRY (계측 정보)</h2>
+                <div class="telemetry-row"><span>FPS (프레임레이트)</span><span id="fps-counter">60</span></div>
+                <div class="telemetry-row"><span>VERTICES (정점 수)</span><span id="vertex-counter">625</span></div>
+                <div class="telemetry-row"><span>PITCH (수직 회전)</span><span id="pitch-val">0.0°</span></div>
+                <div class="telemetry-row"><span>YAW (수평 회전)</span><span id="yaw-val">0.0°</span></div>
+                <div class="telemetry-row"><span>TERRAIN PROFILE</span><span class="cyan-text">TOPOGRAPHIC WIREFRAME</span></div>
+            </div>
+
+            <div class="panel-section telemetry-data" id="target-details-panel" style="display: none;">
+                <h2>SELECTED TARGET (선택 표적)</h2>
+                <div class="telemetry-row"><span>CALLSIGN</span><span id="target-callsign">-</span></div>
+                <div class="telemetry-row"><span>AIRCRAFT</span><span id="target-type">-</span></div>
+                <div class="telemetry-row"><span>REGISTRATION</span><span id="target-reg">-</span></div>
+                <div class="telemetry-row"><span>ROUTE</span><span id="target-route">-</span></div>
+                <div class="telemetry-row"><span>ALTITUDE</span><span id="target-alt">-</span></div>
+                <div class="telemetry-row"><span>SPEED</span><span id="target-speed">-</span></div>
+                <div class="telemetry-row"><span>LATITUDE</span><span id="target-lat">-</span></div>
+                <div class="telemetry-row"><span>LONGITUDE</span><span id="target-lon">-</span></div>
+            </div>
+        </aside>
+
+        <!-- Instructions bottom tooltip -->
+        <div class="tooltip-bar">
+            <span>DRAG MOUSE TO ROTATE (마우스 드래그로 회전) | SCROLL MOUSE WHEEL TO ZOOM (마우스 휠로 확대/축소)</span>
+        </div>
+    </div>
+
+    <!-- satellite.js: SGP4/SDP4 orbital mechanics for real satellite tracking -->
+    <script src="https://unpkg.com/satellite.js@4.1.4/dist/satellite.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
