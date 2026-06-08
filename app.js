@@ -912,8 +912,7 @@ function render(time) {
     // 2. Draw Global Data Center Network (background layer)
     if (state.showDataCenters) drawDataCenters(time);
 
-    // 3. Draw Aircraft Mesh Network (organic lines between nearby aircraft)
-    if (state.showAircraft) drawAircraftMesh(time);
+    // (Aircraft Mesh Network removed per design request)
 
     // (3D atmosphere altitude-layer horizontal lines removed per design request)
 
