@@ -1352,7 +1352,9 @@ function drawDrones(time) {
             }
 
             // Aircraft icon at 3D altitude position (rotated vector airplane icon)
-            const headingRad = d.heading * (Math.PI / 180);
+            // Adjust heading by map bearing so the nose always points in the correct direction on the map
+            const bearing = map.getBearing();
+            const headingRad = (d.heading - bearing) * (Math.PI / 180);
             ctx.save();
             ctx.translate(liftX, liftY);
             ctx.rotate(headingRad);
@@ -1383,6 +1385,15 @@ function drawDrones(time) {
             ctx.closePath();
             ctx.fill();
             ctx.stroke();
+
+            // Draw a short heading line extending from the nose
+            ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.6)';
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(0, -7);
+            ctx.lineTo(0, -17); // 10px heading vector line
+            ctx.stroke();
+
             ctx.restore();
 
             // Draw a target lock ring indicator if selected
