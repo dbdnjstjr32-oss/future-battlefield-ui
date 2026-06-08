@@ -1436,7 +1436,14 @@ function drawVessels(time) {
 // Draw detailed HUD locks around selected targets
 function drawTargetDetails(d) {
     const screenPos = map.project(d.currentCoords);
-    if (screenPos.x < 0 || screenPos.x > canvas.width || screenPos.y < 0 || screenPos.y > canvas.height) return;
+    
+    // Calculate the actual center position (lifting by altitude if it is a flying aircraft)
+    const altKm = (d.altitude || 0) * 0.0003048;
+    const altPx = (d.isVessel || d.isGrounded) ? 0 : altKm * altPxPerKm;
+    const targetX = screenPos.x;
+    const targetY = screenPos.y - altPx;
+
+    if (targetX < 0 || targetX > canvas.width || targetY < -200 || targetY > canvas.height + 200) return;
 
     // Draw Lock bracket rings
     ctx.strokeStyle = '#ffffff';
@@ -1446,30 +1453,30 @@ function drawTargetDetails(d) {
     const size = 20;
     ctx.beginPath();
     // Top-Left
-    ctx.moveTo(screenPos.x - size, screenPos.y - size + 6);
-    ctx.lineTo(screenPos.x - size, screenPos.y - size);
-    ctx.lineTo(screenPos.x - size + 6, screenPos.y - size);
+    ctx.moveTo(targetX - size, targetY - size + 6);
+    ctx.lineTo(targetX - size, targetY - size);
+    ctx.lineTo(targetX - size + 6, targetY - size);
     // Top-Right
-    ctx.moveTo(screenPos.x + size, screenPos.y - size + 6);
-    ctx.lineTo(screenPos.x + size, screenPos.y - size);
-    ctx.lineTo(screenPos.x + size - 6, screenPos.y - size);
+    ctx.moveTo(targetX + size, targetY - size + 6);
+    ctx.lineTo(targetX + size, targetY - size);
+    ctx.lineTo(targetX + size - 6, targetY - size);
     // Bottom-Left
-    ctx.moveTo(screenPos.x - size, screenPos.y + size - 6);
-    ctx.lineTo(screenPos.x - size, screenPos.y + size);
-    ctx.lineTo(screenPos.x - size + 6, screenPos.y + size);
+    ctx.moveTo(targetX - size, targetY + size - 6);
+    ctx.lineTo(targetX - size, targetY + size);
+    ctx.lineTo(targetX - size + 6, targetY + size);
     // Bottom-Right
-    ctx.moveTo(screenPos.x + size, screenPos.y + size - 6);
-    ctx.lineTo(screenPos.x + size, screenPos.y + size);
-    ctx.lineTo(screenPos.x + size - 6, screenPos.y + size);
+    ctx.moveTo(targetX + size, targetY + size - 6);
+    ctx.lineTo(targetX + size, targetY + size);
+    ctx.lineTo(targetX + size - 6, targetY + size);
     ctx.stroke();
 
     // Line connect to telemetry
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(screenPos.x + size, screenPos.y);
-    ctx.lineTo(screenPos.x + size + 35, screenPos.y - 35);
-    ctx.lineTo(screenPos.x + size + 130, screenPos.y - 35);
+    ctx.moveTo(targetX + size, targetY);
+    ctx.lineTo(targetX + size + 35, targetY - 35);
+    ctx.lineTo(targetX + size + 130, targetY - 35);
     ctx.stroke();
 
     // Mini details
@@ -1477,25 +1484,25 @@ function drawTargetDetails(d) {
     ctx.fillStyle = '#ffffff';
     
     if (d.isVessel) {
-        ctx.fillText(`LOCK: ACTIVE [NAVAL]`, screenPos.x + size + 40, screenPos.y - 40);
-        ctx.fillText(`VESSEL: ${d.id}`, screenPos.x + size + 40, screenPos.y - 30);
-        ctx.fillText(`TYPE: ${d.acType || 'N/A'}`, screenPos.x + size + 40, screenPos.y - 20);
-        ctx.fillText(`DIM: ${d.registration || 'N/A'}`, screenPos.x + size + 40, screenPos.y - 10);
-        ctx.fillText(`DWT: ${d.dwt ? parseInt(d.dwt).toLocaleString() + ' tons' : 'N/A'}`, screenPos.x + size + 40, screenPos.y);
+        ctx.fillText(`LOCK: ACTIVE [NAVAL]`, targetX + size + 40, targetY - 40);
+        ctx.fillText(`VESSEL: ${d.id}`, targetX + size + 40, targetY - 30);
+        ctx.fillText(`TYPE: ${d.acType || 'N/A'}`, targetX + size + 40, targetY - 20);
+        ctx.fillText(`DIM: ${d.registration || 'N/A'}`, targetX + size + 40, targetY - 10);
+        ctx.fillText(`DWT: ${d.dwt ? parseInt(d.dwt).toLocaleString() + ' tons' : 'N/A'}`, targetX + size + 40, targetY);
         const vesselKt = (d.velocity / 0.514444).toFixed(1);
-        ctx.fillText(`SPEED: ${vesselKt} kt`, screenPos.x + size + 40, screenPos.y + 10);
-        ctx.fillText(`LAT: ${d.currentCoords[1].toFixed(4)}°N`, screenPos.x + size + 40, screenPos.y + 20);
-        ctx.fillText(`LON: ${d.currentCoords[0].toFixed(4)}°E`, screenPos.x + size + 40, screenPos.y + 30);
+        ctx.fillText(`SPEED: ${vesselKt} kt`, targetX + size + 40, targetY + 10);
+        ctx.fillText(`LAT: ${d.currentCoords[1].toFixed(4)}°N`, targetX + size + 40, targetY + 20);
+        ctx.fillText(`LON: ${d.currentCoords[0].toFixed(4)}°E`, targetX + size + 40, targetY + 30);
     } else {
-        ctx.fillText(`LOCK: ACTIVE [AIR]`, screenPos.x + size + 40, screenPos.y - 40);
-        ctx.fillText(`FLIGHT: ${d.id}`, screenPos.x + size + 40, screenPos.y - 30);
-        ctx.fillText(`TYPE: ${d.acType || 'N/A'} [${d.registration || 'N/A'}]`, screenPos.x + size + 40, screenPos.y - 20);
-        ctx.fillText(`ROUTE: ${d.origin || 'N/A'} > ${d.dest || 'N/A'}`, screenPos.x + size + 40, screenPos.y - 10);
-        ctx.fillText(`ALTITUDE: ${d.isGrounded ? 'ON GROUND' : d.altitude.toLocaleString() + ' ft'}`, screenPos.x + size + 40, screenPos.y);
+        ctx.fillText(`LOCK: ACTIVE [AIR]`, targetX + size + 40, targetY - 40);
+        ctx.fillText(`FLIGHT: ${d.id}`, targetX + size + 40, targetY - 30);
+        ctx.fillText(`TYPE: ${d.acType || 'N/A'} [${d.registration || 'N/A'}]`, targetX + size + 40, targetY - 20);
+        ctx.fillText(`ROUTE: ${d.origin || 'N/A'} > ${d.dest || 'N/A'}`, targetX + size + 40, targetY - 10);
+        ctx.fillText(`ALTITUDE: ${d.isGrounded ? 'ON GROUND' : d.altitude.toLocaleString() + ' ft'}`, targetX + size + 40, targetY);
         const displayKt = d.speedKnots !== undefined ? Math.round(d.speedKnots) : Math.round(d.velocity / 0.514444);
-        ctx.fillText(`SPEED: ${displayKt} kt / ${Math.round(displayKt * 1.15078)} mph`, screenPos.x + size + 40, screenPos.y + 10);
-        ctx.fillText(`LAT: ${d.currentCoords[1].toFixed(4)}°N`, screenPos.x + size + 40, screenPos.y + 20);
-        ctx.fillText(`LON: ${d.currentCoords[0].toFixed(4)}°E`, screenPos.x + size + 40, screenPos.y + 30);
+        ctx.fillText(`SPEED: ${displayKt} kt / ${Math.round(displayKt * 1.15078)} mph`, targetX + size + 40, targetY + 10);
+        ctx.fillText(`LAT: ${d.currentCoords[1].toFixed(4)}°N`, targetX + size + 40, targetY + 20);
+        ctx.fillText(`LON: ${d.currentCoords[0].toFixed(4)}°E`, targetX + size + 40, targetY + 30);
     }
 }
 
