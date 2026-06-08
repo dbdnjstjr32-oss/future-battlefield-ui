@@ -218,11 +218,21 @@ function drawSatTrack(track) {
     if (track.length < 2) return;
     ctx.beginPath();
     let first = true, prevLon = null;
-    for (const pt of track) {
+    const step = 2; // Project every 2nd point to cut projection operations in half
+    for (let i = 0; i < track.length; i += step) {
+        const pt = track[i];
         if (prevLon !== null && Math.abs(pt.lon - prevLon) > 180) { ctx.stroke(); ctx.beginPath(); first = true; }
         const sp = map.project([pt.lon, pt.lat]);
         if (first) { ctx.moveTo(sp.x, sp.y); first = false; } else { ctx.lineTo(sp.x, sp.y); }
         prevLon = pt.lon;
+    }
+    // Always connect the final point for continuity
+    const lastIdx = track.length - 1;
+    if (lastIdx % step !== 0) {
+        const pt = track[lastIdx];
+        if (prevLon !== null && Math.abs(pt.lon - prevLon) > 180) { ctx.stroke(); ctx.beginPath(); }
+        const sp = map.project([pt.lon, pt.lat]);
+        ctx.lineTo(sp.x, sp.y);
     }
     ctx.stroke();
 }
@@ -232,6 +242,15 @@ function drawSatellites(time) {
     if (time - satTrackLastUpdate > SAT_TRACK_INTERVAL) { recomputeSatTracks(); satTrackLastUpdate = time; }
     const now = new Date();
     satObjects.forEach(sat => {
+        // Current position
+        const cur = getSatPos(sat.satrec, now);
+        if (!cur) return;
+        const sp = map.project([cur.lon, cur.lat]);
+
+        // Cull tracks and icon if satellite is extremely far offscreen (> 1500px)
+        const isFarOffscreen = sp.x < -1500 || sp.x > canvas.width + 1500 || sp.y < -1500 || sp.y > canvas.height + 1500;
+        if (isFarOffscreen) return;
+
         if (state.showSatTracks) {
             // Past track
             ctx.save(); ctx.lineWidth = 0.8; ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.setLineDash([]);
@@ -240,10 +259,7 @@ function drawSatellites(time) {
             ctx.save(); ctx.lineWidth = 0.8; ctx.strokeStyle = 'rgba(255,255,255,0.32)'; ctx.setLineDash([5, 7]);
             drawSatTrack(sat.futureTrack); ctx.setLineDash([]); ctx.restore();
         }
-        // Current position
-        const cur = getSatPos(sat.satrec, now);
-        if (!cur) return;
-        const sp = map.project([cur.lon, cur.lat]);
+        
         if (sp.x < -60 || sp.x > canvas.width + 60 || sp.y < -60 || sp.y > canvas.height + 60) return;
         // Satellite icon (central body + solar-panel wings + dish antenna)
         ctx.save();
@@ -388,6 +404,21 @@ function drawDataCenters(time) {
     ctx.shadowBlur = 6;
     ctx.lineCap = 'round';
     dcConnections.forEach(conn => {
+        // Project the two endpoints first to perform bounding box culling
+        const spA = map.project(conn.a.coords);
+        const spB = map.project(conn.b.coords);
+
+        const minX = Math.min(spA.x, spB.x);
+        const maxX = Math.max(spA.x, spB.x);
+        const minY = Math.min(spA.y, spB.y);
+        const maxY = Math.max(spA.y, spB.y);
+        const margin = 150;
+
+        // Skip calculations for links completely offscreen
+        if (maxX < -margin || minX > canvas.width + margin || maxY < -margin || minY > canvas.height + margin) {
+            return;
+        }
+
         const isTrans = Math.abs(conn.a.coords[0] - conn.b.coords[0]) > 60; // intercontinental
         ctx.lineWidth = isTrans ? 1.4 : 1.0;
         ctx.strokeStyle = isTrans
@@ -395,7 +426,9 @@ function drawDataCenters(time) {
             : `rgba(255,255,255,${(0.55 * pulse).toFixed(3)})`;
         ctx.beginPath();
         let first = true, prevLon = null;
-        for (const pt of conn.pts) {
+        const step = 2; // Project every 2nd point for 50% fewer projections
+        for (let i = 0; i < conn.pts.length; i += step) {
+            const pt = conn.pts[i];
             if (prevLon !== null && Math.abs(pt[0] - prevLon) > 180) {
                 ctx.stroke(); ctx.beginPath(); first = true;
             }
@@ -403,6 +436,15 @@ function drawDataCenters(time) {
             if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
             else         { ctx.lineTo(sp.x, sp.y); }
             prevLon = pt[0];
+        }
+        const lastIdx = conn.pts.length - 1;
+        if (lastIdx % step !== 0) {
+            const pt = conn.pts[lastIdx];
+            if (prevLon !== null && Math.abs(pt[0] - prevLon) > 180) {
+                ctx.stroke(); ctx.beginPath();
+            }
+            const sp = map.project(pt);
+            ctx.lineTo(sp.x, sp.y);
         }
         ctx.stroke();
     });
@@ -524,7 +566,7 @@ async function fetchRealFlights() {
                     // Grounded aircraft don't move — skip path to avoid drift
                     if (!isGrounded) {
                         path.push([lon, lat]);
-                        if (path.length > 50) path.shift();
+                        if (path.length > 20) path.shift();
                     }
 
                     return {
@@ -638,7 +680,7 @@ async function fetchRealVessels() {
                 // Docked vessels don't move — skip path updates to avoid drift
                 if (!isDocked) {
                     path.push([lon, lat]);
-                    if (path.length > 50) path.shift();
+                    if (path.length > 20) path.shift();
                 }
 
                 return {
@@ -831,7 +873,7 @@ function render(time) {
         // Save path trails only for airborne aircraft
         if (!d.isGrounded) {
             d.path.push([...d.currentCoords]);
-            if (d.path.length > 50) d.path.shift();
+            if (d.path.length > 20) d.path.shift();
         }
     });
 
@@ -845,7 +887,7 @@ function render(time) {
         v.currentCoords[1] += Math.cos(headingRad) * latSpeed;
 
         v.path.push([...v.currentCoords]);
-        if (v.path.length > 50) v.path.shift();
+        if (v.path.length > 20) v.path.shift();
     });
 
     // Update scanline sweep progress
@@ -1269,15 +1311,21 @@ function drawDrones(time) {
                 ctx.restore();
             }
 
-            // Draw path trail at ground level (still shows ground track)
+            // Draw path trail at ground level (projecting every 2nd point for optimization)
             if (d.path.length > 1) {
                 ctx.beginPath();
                 ctx.lineWidth = 0.7;
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
                 const startPos = map.project(d.path[0]);
                 ctx.moveTo(startPos.x, startPos.y);
-                for (let i = 1; i < d.path.length; i++) {
+                const step = 2;
+                for (let i = 1; i < d.path.length; i += step) {
                     const pos = map.project(d.path[i]);
+                    ctx.lineTo(pos.x, pos.y);
+                }
+                const lastIdx = d.path.length - 1;
+                if (lastIdx % step !== 0) {
+                    const pos = map.project(d.path[lastIdx]);
                     ctx.lineTo(pos.x, pos.y);
                 }
                 ctx.stroke();
@@ -1309,15 +1357,21 @@ function drawVessels(time) {
         const screenPos = map.project(v.currentCoords);
         if (screenPos.x < 0 || screenPos.x > canvas.width || screenPos.y < 0 || screenPos.y > canvas.height) return;
 
-        // Draw path trail
+        // Draw path trail (projecting every 2nd point for optimization)
         if (v.path.length > 1) {
             ctx.beginPath();
             ctx.lineWidth = 1;
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
             const startPos = map.project(v.path[0]);
             ctx.moveTo(startPos.x, startPos.y);
-            for (let i = 1; i < v.path.length; i++) {
+            const step = 2;
+            for (let i = 1; i < v.path.length; i += step) {
                 const pos = map.project(v.path[i]);
+                ctx.lineTo(pos.x, pos.y);
+            }
+            const lastIdx = v.path.length - 1;
+            if (lastIdx % step !== 0) {
+                const pos = map.project(v.path[lastIdx]);
                 ctx.lineTo(pos.x, pos.y);
             }
             ctx.stroke();
