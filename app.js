@@ -1351,15 +1351,50 @@ function drawDrones(time) {
                 ctx.stroke();
             }
 
-            // Aircraft icon at 3D altitude position
-            ctx.fillStyle = '#ffffff';
+            // Aircraft icon at 3D altitude position (rotated vector airplane icon)
+            const headingRad = d.heading * (Math.PI / 180);
+            ctx.save();
+            ctx.translate(liftX, liftY);
+            ctx.rotate(headingRad);
+            
+            ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.65)';
+            ctx.fillStyle = isSelected ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.08)';
+            ctx.lineWidth = 1.0;
+            
             ctx.beginPath();
-            ctx.arc(liftX, liftY, 3, 0, Math.PI * 2);
+            ctx.moveTo(0, -7);
+            ctx.lineTo(-1, -4);
+            ctx.lineTo(-1, 0);
+            ctx.lineTo(-8, 2);
+            ctx.lineTo(-8, 3.5);
+            ctx.lineTo(-1, 2);
+            ctx.lineTo(-1, 5);
+            ctx.lineTo(-3.5, 6.5);
+            ctx.lineTo(-3.5, 7.5);
+            ctx.lineTo(0, 6.5);
+            ctx.lineTo(3.5, 7.5);
+            ctx.lineTo(3.5, 6.5);
+            ctx.lineTo(1, 5);
+            ctx.lineTo(1, 2);
+            ctx.lineTo(8, 3.5);
+            ctx.lineTo(8, 2);
+            ctx.lineTo(1, 0);
+            ctx.lineTo(1, -4);
+            ctx.closePath();
             ctx.fill();
+            ctx.stroke();
+            ctx.restore();
 
-            ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.4)';
-            ctx.lineWidth = isSelected ? 1.5 : 1;
-            ctx.strokeRect(liftX - 8, liftY - 8, 16, 16);
+            // Draw a target lock ring indicator if selected
+            if (isSelected) {
+                ctx.save();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1.2;
+                ctx.beginPath();
+                ctx.arc(liftX, liftY, 11, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+            }
 
             ctx.font = '9px "Share Tech Mono", monospace';
             ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
