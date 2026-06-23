@@ -54,6 +54,112 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // Handle Geocoding API proxy (via Nominatim)
+    if (req.url.startsWith('/api/geocode')) {
+        const parsedUrl = new URL(req.url, 'http://localhost');
+        const query = parsedUrl.searchParams.get('q');
+        
+        if (!query) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Missing query parameter' }));
+            return;
+        }
+        
+        const targetUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
+        console.log(`[Proxy] Fetching geocode for: "${query}"`);
+        
+        const geoRequest = https.get(targetUrl, {
+            headers: {
+                'User-Agent': 'TacticalHUDApp/1.0 (dbdnj@daum.net)',
+                'Accept': 'application/json'
+            }
+        }, (geoResponse) => {
+            res.writeHead(geoResponse.statusCode, {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Access-Control-Allow-Origin': '*'
+            });
+            geoResponse.pipe(res);
+        });
+        
+        geoRequest.on('error', (err) => {
+            console.error('[Proxy Error] Geocode fetch failed:', err.message);
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Failed to geocode address', details: err.message }));
+        });
+        return;
+    }
+
+    // Handle Real Delivery Tracking API proxy
+    if (req.url.startsWith('/api/track')) {
+        const parsedUrl = new URL(req.url, 'http://localhost');
+        const carrier = parsedUrl.searchParams.get('carrier');
+        const invoice = parsedUrl.searchParams.get('invoice');
+        
+        if (!carrier || !invoice) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Missing carrier or invoice parameter' }));
+            return;
+        }
+        
+        const targetUrl = `https://apis.tracker.delivery/carriers/${carrier}/tracks/${invoice}`;
+        console.log(`[Proxy] Fetching package tracking from: ${targetUrl}`);
+        
+        const trackRequest = https.get(targetUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json'
+            }
+        }, (trackResponse) => {
+            res.writeHead(trackResponse.statusCode, {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Access-Control-Allow-Origin': '*'
+            });
+            trackResponse.pipe(res);
+        });
+        
+        trackRequest.on('error', (err) => {
+            console.error('[Proxy Error] Tracking fetch failed:', err.message);
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Failed to fetch tracking data', details: err.message }));
+        });
+        return;
+    }
+
+    // Handle Aircraft Photo API proxy (to Planespotters.net)
+    if (req.url.startsWith('/api/aircraft-photo')) {
+        const parsedUrl = new URL(req.url, 'http://localhost');
+        const reg = parsedUrl.searchParams.get('reg');
+        
+        if (!reg) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Missing reg parameter' }));
+            return;
+        }
+        
+        const targetUrl = `https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg)}`;
+        console.log(`[Proxy] Fetching aircraft photo for registration: "${reg}"`);
+        
+        const photoRequest = https.get(targetUrl, {
+            headers: {
+                'User-Agent': 'MyFlightTracker/1.2 (+https://example.com/contact)',
+                'Accept': 'application/json'
+            }
+        }, (photoResponse) => {
+            res.writeHead(photoResponse.statusCode, {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Access-Control-Allow-Origin': '*'
+            });
+            photoResponse.pipe(res);
+        });
+        
+        photoRequest.on('error', (err) => {
+            console.error('[Proxy Error] Aircraft photo fetch failed:', err.message);
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Failed to fetch aircraft photo', details: err.message }));
+        });
+        return;
+    }
+
     // Handle Flightradar24 API proxy
     if (req.url === '/api/flights') {
         console.log(`[Proxy] Fetching live flight data from Flightradar24...`);

@@ -11,12 +11,51 @@ const state = {
     gridInterval: 0.5,
     isAutoRot: false,
     isNoiseWave: true,
-    isScanline: true,
+    isScanline: false,
     showAircraft: true,
     showVessels: true,
-    showDataCenters: true,
-    showSatTracks: true,
-    scanProgress: 0
+    showDataCenters: false,
+    showSatTracks: false,
+    scanProgress: 0,
+    isFollowing: true
+};
+
+// Tactical Delivery (Cargo Tracking) State
+const LOGISTICS_HUBS = {
+    gonjiam: { name: "CJ Gonjiam Mega Hub", coords: [127.2947, 37.3828], desc: "경기도 광주 초월읍 메가허브" },
+    okcheon: { name: "CJ Okcheon Hub", coords: [127.5901, 36.3155], desc: "충북 옥천군 옥천허브 (Black Hole)" },
+    daejeon: { name: "CJ Daejeon Hub", coords: [127.4208, 36.3882], desc: "대전광역시 대덕구 대전허브" },
+    jincheon: { name: "Lotte Jincheon Mega Hub", coords: [127.4398, 36.8831], desc: "충청북도 진천군 메가허브" },
+    chilgok: { name: "Hanjin Chilgok Hub", coords: [128.4069, 35.9863], desc: "경상북도 칠곡군 영남복합물류" },
+    jangseong: { name: "CJ Jangseong Hub", coords: [126.8372, 35.2678], desc: "전라남도 장성군 호남물류" },
+    
+    seoul_hq: { name: "Seoul HQ Terminal", coords: [127.05, 37.45], desc: "서울특별시 강남구 지사" },
+    busan_base: { name: "Busan Terminal", coords: [129.09, 35.10], desc: "부산광역시 영도구 지사" },
+    daegu_center: { name: "Daegu Terminal", coords: [128.60, 35.87], desc: "대구광역시 동구 지사" },
+    gwangju_center: { name: "Gwangju Terminal", coords: [126.85, 35.16], desc: "광주광역시 광산구 지사" },
+    jeju_airfield: { name: "Jeju Terminal", coords: [126.46, 33.24], desc: "제주특별자치도 제주시 지사" },
+    incheon_airport: { name: "Incheon Cargo Terminal", coords: [126.45, 37.45], desc: "인천국제공항 화물지사" },
+    gangneung_center: { name: "Gangneung Terminal", coords: [128.90, 37.75], desc: "강원특별자치도 강릉시 지사" }
+};
+
+const trackingState = {
+    active: false,
+    courier: '',
+    invoice: '',
+    routeStages: [],    // Stages: { name, coords, statusText, desc, time }
+    activeStageIndex: 0,
+    osrmCoords: [],     // Coordinates of the current OSRM road path
+    currentPos: null,   // [lng, lat]
+    pathProgress: 0.0,
+    speed: 0.10,
+    status: 'idle',     // 'idle', 'loading', 'hub_stationed', 'in_transit', 'delivered'
+    statusTimer: 0.0
+};
+
+const plotterState = {
+    active: false,
+    name: '',
+    coords: null // [lon, lat]
 };
 
 // Altitude layer scale (pixels per km in vertical dimension, updated each frame)
@@ -54,6 +93,528 @@ const map = new maplibregl.Map({
     attributionControl: false
 });
 
+// ─── Cargo Tracking (Tactical Parcel Follower) & Geocoding Logic ───
+const carrierMap = {
+    cj: 'kr.cjlogistics',
+    coupang: 'kr.coupangls',
+    hanjin: 'kr.hanjin',
+    lotte: 'kr.lotte',
+    post: 'kr.epost'
+};
+
+function getCoordsForName(name, invoice, index, totalEvents) {
+    const lower = name.toLowerCase();
+    
+    if (lower.includes("곤지암") || lower.includes("gonjiam")) return LOGISTICS_HUBS.gonjiam.coords;
+    if (lower.includes("옥천") || lower.includes("okcheon")) return LOGISTICS_HUBS.okcheon.coords;
+    if (lower.includes("대전") || lower.includes("daejeon") || lower.includes("대덕")) return LOGISTICS_HUBS.daejeon.coords;
+    if (lower.includes("진천") || lower.includes("jincheon")) return LOGISTICS_HUBS.jincheon.coords;
+    if (lower.includes("칠곡") || lower.includes("chilgok")) return LOGISTICS_HUBS.chilgok.coords;
+    if (lower.includes("장성") || lower.includes("jangseong")) return LOGISTICS_HUBS.jangseong.coords;
+    if (lower.includes("부산") || lower.includes("busan")) return LOGISTICS_HUBS.busan_base.coords;
+    if (lower.includes("대구") || lower.includes("daegu")) return LOGISTICS_HUBS.daegu_center.coords;
+    if (lower.includes("광주") || lower.includes("gwangju")) return LOGISTICS_HUBS.gwangju_center.coords;
+    if (lower.includes("인천") || lower.includes("incheon")) return LOGISTICS_HUBS.incheon_airport.coords;
+    if (lower.includes("강릉") || lower.includes("gangneung")) return LOGISTICS_HUBS.gangneung_center.coords;
+    if (lower.includes("서울") || lower.includes("seoul")) return LOGISTICS_HUBS.seoul_hq.coords;
+    
+    // Fallback region matches
+    if (lower.includes("경기") || lower.includes("수원") || lower.includes("성남") || lower.includes("고양") || lower.includes("용인") || lower.includes("의정부") || lower.includes("남양주")) {
+        return [127.1 + (index * 0.03), 37.3 + (index * 0.02)];
+    }
+    if (lower.includes("경북") || lower.includes("포항") || lower.includes("경주") || lower.includes("구미") || lower.includes("안동")) {
+        return [128.6 + (index * 0.03), 36.2 + (index * 0.02)];
+    }
+    if (lower.includes("경남") || lower.includes("창원") || lower.includes("김해") || lower.includes("진주") || lower.includes("양산")) {
+        return [128.7 + (index * 0.03), 35.2 + (index * 0.02)];
+    }
+    if (lower.includes("충북") || lower.includes("청주") || lower.includes("충주")) {
+        return [127.6 + (index * 0.03), 36.8 + (index * 0.02)];
+    }
+    if (lower.includes("충남") || lower.includes("천안") || lower.includes("아산") || lower.includes("서산")) {
+        return [127.0 + (index * 0.03), 36.6 + (index * 0.02)];
+    }
+    if (lower.includes("전북") || lower.includes("전주") || lower.includes("익산")) {
+        return [127.1 + (index * 0.03), 35.8 + (index * 0.02)];
+    }
+    if (lower.includes("전남") || lower.includes("여수") || lower.includes("순천") || lower.includes("목포")) {
+        return [126.9 + (index * 0.03), 34.8 + (index * 0.02)];
+    }
+    if (lower.includes("강원") || lower.includes("춘천") || lower.includes("원주") || lower.includes("속초")) {
+        return [128.2 + (index * 0.03), 37.8 + (index * 0.02)];
+    }
+    if (lower.includes("제주")) {
+        return [126.5 + (index * 0.02), 33.3 + (index * 0.02)];
+    }
+    
+    // Hash-based deterministic coordinates inside South Korea
+    let hash = 0;
+    const str = name + invoice;
+    for (let i = 0; i < str.length; i++) {
+        hash = (hash * 31 + str.charCodeAt(i)) % 10000;
+    }
+    
+    const lng = 126.6 + ((hash + index * 57) % 220) * 0.01;
+    const lat = 35.3 + (((hash / 10) + index * 63) % 180) * 0.01;
+    return [lng, lat];
+}
+
+function parseLocationNameAndCoords(progress, index, totalEvents, invoice) {
+    let name = "";
+    if (progress.location && typeof progress.location === 'object') {
+        name = progress.location.name || "";
+    } else if (progress.location && typeof progress.location === 'string') {
+        name = progress.location;
+    }
+    
+    if (!name && progress.description) {
+        const match = progress.description.match(/([가-힣\w]+(?:HUB|허브|센터|지점|대리점|지사|터미널|포트))/i);
+        if (match) {
+            name = match[1];
+        } else {
+            const cityMatch = progress.description.match(/(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|곤지암|옥천|칠곡|장성|진천)/);
+            if (cityMatch) {
+                name = cityMatch[1] + " 센터";
+            }
+        }
+    }
+    
+    if (!name) {
+        name = `지점 ${index + 1}`;
+    }
+    
+    const coords = getCoordsForName(name, invoice, index, totalEvents);
+    return { name, coords };
+}
+
+function getRelativeTimeString(offsetHours) {
+    const d = new Date();
+    d.setHours(d.getHours() + offsetHours);
+    return `${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+}
+
+function generateSimulationRouteStages(courier, invoice) {
+    let hash = 0;
+    for (let i = 0; i < invoice.length; i++) {
+        hash = (hash * 31 + invoice.charCodeAt(i)) % 1000;
+    }
+    
+    const sellerBases = [
+        { name: "Busan Terminal", coords: LOGISTICS_HUBS.busan_base.coords, text: "부산 수영지사 집하 처리" },
+        { name: "Daegu Terminal", coords: LOGISTICS_HUBS.daegu_center.coords, text: "대구 북구지사 집하 처리" },
+        { name: "Gwangju Terminal", coords: LOGISTICS_HUBS.gwangju_center.coords, text: "광주 광산지사 집하 처리" },
+        { name: "Gangneung Terminal", coords: LOGISTICS_HUBS.gangneung_center.coords, text: "강원 강릉지사 집하 처리" },
+        { name: "Incheon Terminal", coords: LOGISTICS_HUBS.incheon_airport.coords, text: "인천 중구지사 집하 처리" }
+    ];
+    
+    const destinations = [
+        { name: "Seoul HQ", coords: LOGISTICS_HUBS.seoul_hq.coords, text: "서울 강남구 배송지" },
+        { name: "Gyeryongdae HQ", coords: [127.24, 36.29], text: "충남 계룡대 본부 배송지" },
+        { name: "Busan Naval Base", coords: [129.09, 35.10], text: "부산 남구 해군기지 배송지" },
+        { name: "Jeju Terminal", coords: LOGISTICS_HUBS.jeju_airfield.coords, text: "제주 제주시 배송지" }
+    ];
+    
+    const start = sellerBases[hash % sellerBases.length];
+    let dest = destinations[(hash + 1) % destinations.length];
+    if (start.name.startsWith("Busan") && dest.name.startsWith("Busan")) {
+        dest = destinations[0];
+    }
+    
+    const hubs = [];
+    if (start.name.includes("Busan") || start.name.includes("Daegu")) {
+        hubs.push({ name: "Chilgok Hub", coords: LOGISTICS_HUBS.chilgok.coords, text: "한진 칠곡허브 입고" });
+        hubs.push({ name: "Okcheon Hub", coords: LOGISTICS_HUBS.okcheon.coords, text: "CJ 옥천허브 간선하차" });
+        hubs.push({ name: "Gonjiam Hub", coords: LOGISTICS_HUBS.gonjiam.coords, text: "CJ 곤지암메가허브 간선상차" });
+    } else if (start.name.includes("Gwangju")) {
+        hubs.push({ name: "Jangseong Hub", coords: LOGISTICS_HUBS.jangseong.coords, text: "CJ 장성허브 입고" });
+        hubs.push({ name: "Daejeon Hub", coords: LOGISTICS_HUBS.daejeon.coords, text: "CJ 대전허브 간선하차" });
+        hubs.push({ name: "Gonjiam Hub", coords: LOGISTICS_HUBS.gonjiam.coords, text: "CJ 곤지암메가허브 간선상차" });
+    } else if (start.name.includes("Gangneung")) {
+        hubs.push({ name: "Jincheon Hub", coords: LOGISTICS_HUBS.jincheon.coords, text: "롯데 진천메가허브 입고" });
+        hubs.push({ name: "Gonjiam Hub", coords: LOGISTICS_HUBS.gonjiam.coords, text: "CJ 곤지암메가허브 간선상차" });
+    } else {
+        hubs.push({ name: "Gonjiam Hub", coords: LOGISTICS_HUBS.gonjiam.coords, text: "CJ 곤지암메가허브 입고" });
+        hubs.push({ name: "Daejeon Hub", coords: LOGISTICS_HUBS.daejeon.coords, text: "CJ 대전허브 간선상차" });
+    }
+    
+    if (dest.name.includes("Jeju")) {
+        hubs.push({ name: "Busan Terminal", coords: LOGISTICS_HUBS.busan_base.coords, text: "부산항선박화물 선적 대기" });
+    }
+    
+    const stages = [];
+    stages.push({
+        name: start.name,
+        coords: start.coords,
+        statusText: "SHIPPED",
+        desc: start.text,
+        time: getRelativeTimeString(-12)
+    });
+    
+    hubs.forEach((hub, idx) => {
+        stages.push({
+            name: hub.name,
+            coords: hub.coords,
+            statusText: "IN_TRANSIT",
+            desc: hub.text,
+            time: getRelativeTimeString(-8 + idx * 2)
+        });
+    });
+    
+    stages.push({
+        name: dest.name,
+        coords: dest.coords,
+        statusText: "DELIVERED",
+        desc: dest.text,
+        time: "PENDING"
+    });
+    
+    return stages;
+}
+
+async function fetchOSRMRoute(startCoords, endCoords) {
+    try {
+        const url = `https://router.project-osrm.org/route/v1/driving/${startCoords[0]},${startCoords[1]};${endCoords[0]},${endCoords[1]}?geometries=geojson&overview=full`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('OSRM status ' + res.status);
+        const data = await res.json();
+        if (data.routes && data.routes.length > 0 && data.routes[0].geometry) {
+            return data.routes[0].geometry.coordinates;
+        }
+        throw new Error('No routes returned');
+    } catch (e) {
+        console.warn('[OSRM] Routing failed, falling back to geodesic line:', e.message);
+        const pts = [];
+        const steps = 30;
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            pts.push([
+                startCoords[0] + (endCoords[0] - startCoords[0]) * t,
+                startCoords[1] + (endCoords[1] - startCoords[1]) * t
+            ]);
+        }
+        return pts;
+    }
+}
+
+function updateTrackingLogUI() {
+    const container = document.getElementById('tracking-log');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    trackingState.routeStages.forEach((stage, idx) => {
+        const item = document.createElement('div');
+        item.className = 'log-item';
+        if (idx === trackingState.activeStageIndex) {
+            item.classList.add('active');
+        }
+        
+        let statusMarker = '';
+        if (idx < trackingState.activeStageIndex) {
+            statusMarker = '✓ ';
+        } else if (idx === trackingState.activeStageIndex) {
+            statusMarker = (trackingState.status === 'delivered') ? '● ' : '▶ ';
+        } else {
+            statusMarker = '○ ';
+        }
+        
+        const timeText = stage.time === 'PENDING' ? '' : stage.time;
+        
+        item.innerHTML = `
+            <div class="log-item-meta">
+                <span>${statusMarker}${stage.name}</span>
+                <span>${timeText}</span>
+            </div>
+            <div class="log-item-desc">${stage.desc}</div>
+        `;
+        container.appendChild(item);
+    });
+    
+    const activeItem = container.querySelector('.log-item.active');
+    if (activeItem) {
+        activeItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+}
+
+async function transitionToNextStage() {
+    const i = trackingState.activeStageIndex;
+    if (i >= trackingState.routeStages.length - 1) {
+        trackingState.status = 'delivered';
+        document.getElementById('track-status-summary').textContent = "DELIVERED";
+        return;
+    }
+    
+    trackingState.status = 'loading';
+    document.getElementById('track-status-summary').textContent = "ROUTE PLAN...";
+    
+    const start = trackingState.routeStages[i].coords;
+    const end = trackingState.routeStages[i+1].coords;
+    
+    const coords = await fetchOSRMRoute(start, end);
+    trackingState.osrmCoords = coords;
+    trackingState.pathProgress = 0.0;
+    trackingState.status = 'in_transit';
+    trackingState.speed = 0.08;
+    
+    document.getElementById('track-status-summary').textContent = "IN TRANSIT";
+    updateTrackingLogUI();
+}
+
+async function startTracking() {
+    const courierSelect = document.getElementById('courier-select');
+    const trackingInput = document.getElementById('tracking-input');
+    const trackingStatusPanel = document.getElementById('tracking-status-panel');
+    const trackBtn = document.getElementById('track-btn');
+    
+    if (!courierSelect || !trackingInput || !trackingStatusPanel || !trackBtn) return;
+    
+    const courier = courierSelect.value;
+    const invoice = trackingInput.value.trim();
+    
+    if (!invoice) {
+        alert("운송장 번호를 입력해주세요.");
+        return;
+    }
+    
+    trackBtn.disabled = true;
+    trackBtn.textContent = "조회 중...";
+    
+    const carrierId = carrierMap[courier] || courier;
+    
+    try {
+        console.log(`[Tracking] Fetching real shipment info for ${carrierId} - ${invoice}`);
+        const res = await fetch(`/api/track?carrier=${carrierId}&invoice=${invoice}`);
+        
+        if (!res.ok) {
+            if (res.status === 404) {
+                throw new Error("해당 운송장 번호의 배송 내역을 찾을 수 없습니다. (택배사 시스템에 미등록된 상태일 수 있습니다.)");
+            } else {
+                throw new Error(`서버 오류 (Status ${res.status})`);
+            }
+        }
+        
+        const data = await res.json();
+        
+        if (!data.progresses || data.progresses.length === 0) {
+            throw new Error("조회된 배송 진행 내역이 없습니다.");
+        }
+        
+        const stages = [];
+        const total = data.progresses.length;
+        
+        data.progresses.forEach((prog, idx) => {
+            const { name, coords } = parseLocationNameAndCoords(prog, idx, total, invoice);
+            
+            let cleanTime = "";
+            if (prog.time) {
+                try {
+                    const date = new Date(prog.time);
+                    cleanTime = `${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+                } catch (err) {
+                    cleanTime = prog.time.substring(5, 16).replace('T', ' ');
+                }
+            }
+            
+            stages.push({
+                name: name,
+                coords: coords,
+                statusText: prog.status ? prog.status.id : "IN_TRANSIT",
+                desc: prog.description || "배송 물류 이동 중",
+                time: cleanTime || "시간 정보 없음"
+            });
+        });
+        
+        const lastState = data.state ? data.state.id : "";
+        if (lastState !== 'delivered' && stages.length > 0) {
+            const lastStage = stages[stages.length - 1];
+            let destCoords = LOGISTICS_HUBS.seoul_hq.coords;
+            if (lastStage.coords[0] === destCoords[0] && lastStage.coords[1] === destCoords[1]) {
+                destCoords = [127.24, 36.29];
+            }
+            
+            stages.push({
+                name: "배송 목적지",
+                coords: destCoords,
+                statusText: "PENDING",
+                desc: "최종 배송지로 배송 예정",
+                time: "PENDING"
+            });
+        }
+        
+        state.isFollowing = true;
+        trackingState.active = true;
+        trackingState.courier = courier;
+        trackingState.invoice = invoice;
+        trackingState.routeStages = stages;
+        trackingState.activeStageIndex = 0;
+        trackingState.status = 'hub_stationed';
+        trackingState.statusTimer = 3.0;
+        trackingState.currentPos = [...trackingState.routeStages[0].coords];
+        trackingState.pathProgress = 0.0;
+        trackingState.osrmCoords = [];
+        
+        document.getElementById('track-status-summary').textContent = "REAL TRACK";
+        trackingStatusPanel.style.display = 'flex';
+        updateTrackingLogUI();
+        
+        map.flyTo({
+            center: trackingState.currentPos,
+            zoom: 15.5,
+            pitch: 40,
+            bearing: -10
+        });
+        
+        state.isAutoRot = true;
+        const toggleAutoRotEl = document.getElementById('toggle-autorot');
+        if (toggleAutoRotEl) {
+            toggleAutoRotEl.checked = true;
+        }
+        
+    } catch (e) {
+        console.warn('[Tracking API] Real-time fetch failed:', e.message);
+        
+        const useMock = confirm(`실제 운송장 정보 조회 실패: ${e.message}\n\n시뮬레이션 모드로 가상의 경로 추적을 시동하겠습니까?`);
+        if (useMock) {
+            runSimulationTracking(courier, invoice);
+        } else {
+            abortTracking();
+        }
+    } finally {
+        trackBtn.disabled = false;
+        trackBtn.textContent = "TRACK";
+    }
+}
+
+function runSimulationTracking(courier, invoice) {
+    const trackingStatusPanel = document.getElementById('tracking-status-panel');
+    
+    state.isFollowing = true;
+    trackingState.active = true;
+    trackingState.courier = courier;
+    trackingState.invoice = invoice;
+    trackingState.routeStages = generateSimulationRouteStages(courier, invoice);
+    trackingState.activeStageIndex = 0;
+    trackingState.status = 'hub_stationed';
+    trackingState.statusTimer = 3.0;
+    trackingState.currentPos = [...trackingState.routeStages[0].coords];
+    trackingState.pathProgress = 0.0;
+    trackingState.osrmCoords = [];
+    
+    document.getElementById('track-status-summary').textContent = "SIMULATION";
+    if (trackingStatusPanel) trackingStatusPanel.style.display = 'flex';
+    updateTrackingLogUI();
+    
+    map.flyTo({
+        center: trackingState.currentPos,
+        zoom: 15.5,
+        pitch: 40,
+        bearing: -10
+    });
+    
+    state.isAutoRot = true;
+    const toggleAutoRotEl = document.getElementById('toggle-autorot');
+    if (toggleAutoRotEl) {
+        toggleAutoRotEl.checked = true;
+    }
+}
+
+function abortTracking() {
+    trackingState.active = false;
+    trackingState.status = 'idle';
+    trackingState.currentPos = null;
+    trackingState.osrmCoords = [];
+    trackingState.routeStages = [];
+    
+    const trackingStatusPanel = document.getElementById('tracking-status-panel');
+    if (trackingStatusPanel) {
+        trackingStatusPanel.style.display = 'none';
+    }
+}
+
+async function searchAndPlotLocation() {
+    const geocodeInput = document.getElementById('geocode-input');
+    const geocodeBtn = document.getElementById('geocode-btn');
+    
+    if (!geocodeInput || !geocodeBtn) return;
+    
+    const query = geocodeInput.value.trim();
+    if (!query) {
+        alert("검색할 주소 또는 위치명을 입력하세요.");
+        return;
+    }
+    
+    geocodeBtn.disabled = true;
+    geocodeBtn.textContent = "조회 중...";
+    
+    try {
+        console.log(`[Geocoding] Querying Nominatim for: "${query}"`);
+        const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        
+        const data = await res.json();
+        
+        if (!data || data.length === 0) {
+            throw new Error("위치를 찾을 수 없습니다.");
+        }
+        
+        const place = data[0];
+        const lon = parseFloat(place.lon);
+        const lat = parseFloat(place.lat);
+        
+        console.log(`[Geocoding] Location found: ${place.display_name} -> [${lon}, ${lat}]`);
+        
+        state.isFollowing = true;
+        plotterState.active = true;
+        plotterState.name = place.display_name.split(',')[0].trim().toUpperCase() || query.toUpperCase();
+        plotterState.coords = [lon, lat];
+        
+        // Show plotter status panel
+        const plotterStatusPanel = document.getElementById('plotter-status-panel');
+        const plotterTargetName = document.getElementById('plotter-target-name');
+        const plotterCoords = document.getElementById('plotter-coords');
+        if (plotterStatusPanel) plotterStatusPanel.style.display = 'flex';
+        if (plotterTargetName) plotterTargetName.textContent = plotterState.name;
+        if (plotterCoords) plotterCoords.textContent = `${lat.toFixed(5)}°N, ${lon.toFixed(5)}°E`;
+        
+        // Deep zoom and oblique camera angle
+        map.flyTo({
+            center: [lon, lat],
+            zoom: 15.0,
+            pitch: 40,
+            bearing: -10,
+            duration: 2500
+        });
+        
+        // Trigger auto rotation
+        state.isAutoRot = true;
+        const toggleAutoRotEl = document.getElementById('toggle-autorot');
+        if (toggleAutoRotEl) {
+            toggleAutoRotEl.checked = true;
+        }
+        
+        geocodeBtn.textContent = "LOCKED!";
+        setTimeout(() => {
+            geocodeBtn.textContent = "PLOT TARGET";
+            geocodeBtn.disabled = false;
+        }, 1500);
+        
+    } catch (e) {
+        alert(`위치 조회 실패: ${e.message}`);
+        geocodeBtn.textContent = "PLOT TARGET";
+        geocodeBtn.disabled = false;
+    }
+}
+
+function releasePlotterTarget() {
+    plotterState.active = false;
+    plotterState.name = '';
+    plotterState.coords = null;
+    
+    const plotterStatusPanel = document.getElementById('plotter-status-panel');
+    if (plotterStatusPanel) {
+        plotterStatusPanel.style.display = 'none';
+    }
+}
+
 // Canvas Resizing
 function resizeCanvas() {
     canvas.width = window.innerWidth;
@@ -63,10 +624,6 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 // Connect DOM controls
-const heightSlider = document.getElementById('height-scale');
-const heightValEl = document.getElementById('height-val');
-const resSlider = document.getElementById('grid-resolution');
-const resValEl = document.getElementById('res-val');
 const zoomSlider = document.getElementById('camera-zoom');
 const zoomValEl = document.getElementById('zoom-val');
 const speedSlider = document.getElementById('auto-rot-speed');
@@ -74,7 +631,6 @@ const speedValEl = document.getElementById('speed-val');
 
 const toggleAutoRot = document.getElementById('toggle-autorot');
 const toggleNoiseWave = document.getElementById('toggle-noise-wave');
-const toggleScanline = document.getElementById('toggle-scanline');
 const toggleAircraft = document.getElementById('toggle-aircraft');
 const toggleVessels = document.getElementById('toggle-vessels');
 const toggleDataCenter = document.getElementById('toggle-datacenter');
@@ -99,24 +655,27 @@ const yawValEl = document.getElementById('yaw-val');
 const fpsCounter = document.getElementById('fps-counter');
 const vertexCounter = document.getElementById('vertex-counter');
 
-// Set slider initial settings
-heightSlider.disabled = true; // Height scale disabled as 3D terrain uses actual map projection
-heightValEl.textContent = "MAP CONTROLLER";
+// Bind Cargo Tracking & Geocoding Button Events
+const trackBtn = document.getElementById('track-btn');
+const cancelBtn = document.getElementById('track-cancel-btn');
+const geocodeBtn = document.getElementById('geocode-btn');
+const plotterClearBtn = document.getElementById('plotter-clear-btn');
+if (trackBtn) trackBtn.addEventListener('click', startTracking);
+if (cancelBtn) cancelBtn.addEventListener('click', abortTracking);
+if (geocodeBtn) geocodeBtn.addEventListener('click', searchAndPlotLocation);
+if (plotterClearBtn) plotterClearBtn.addEventListener('click', releasePlotterTarget);
 
-// Resolution slider controls Grid Line Spacing
-resSlider.min = "1";
-resSlider.max = "10";
-resSlider.value = "5"; // 0.5 degrees
-resValEl.textContent = "0.5° Spacing";
+const tacticalCloseBtn = document.getElementById('tactical-close-btn');
+if (tacticalCloseBtn) {
+    tacticalCloseBtn.addEventListener('click', () => {
+        selectDrone(null);
+    });
+}
 
-resSlider.addEventListener('input', (e) => {
-    const val = parseInt(e.target.value);
-    state.gridInterval = val * 0.1;
-    resValEl.textContent = `${state.gridInterval.toFixed(1)}° Spacing`;
-});
 
-zoomSlider.min = "5";
-zoomSlider.max = "12";
+
+zoomSlider.min = "2";
+zoomSlider.max = "18";
 zoomSlider.step = "0.1";
 zoomSlider.value = state.zoom;
 zoomValEl.textContent = state.zoom.toFixed(1) + 'x';
@@ -125,6 +684,59 @@ zoomSlider.addEventListener('input', (e) => {
     state.zoom = parseFloat(e.target.value);
     map.setZoom(state.zoom);
     zoomValEl.textContent = state.zoom.toFixed(1) + 'x';
+});
+
+document.querySelectorAll('.zoom-preset-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        const targetZoom = parseFloat(e.target.getAttribute('data-zoom'));
+        state.zoom = targetZoom;
+        map.setZoom(targetZoom);
+        zoomSlider.value = targetZoom;
+        zoomValEl.textContent = targetZoom.toFixed(1) + 'x';
+        state.isFollowing = true;
+    });
+});
+
+// Map Color Filter Preset Buttons
+const MAP_FILTERS = {
+    gray: 'grayscale(100%) brightness(0.75) contrast(1.1)',
+    cyan: 'grayscale(100%) sepia(100%) hue-rotate(150deg) saturate(180%) brightness(0.7) contrast(1.1)',
+    green: 'grayscale(100%) sepia(100%) hue-rotate(85deg) saturate(300%) brightness(0.75) contrast(1.2)',
+    real: 'none'
+};
+
+// Set initial default theme attribute — grayscale (흑백) as default
+document.documentElement.setAttribute('data-theme', 'gray');
+
+// Apply default grayscale filter to map on load
+const _initMapEl = document.getElementById('map');
+if (_initMapEl) _initMapEl.style.filter = MAP_FILTERS.gray;
+
+// Mark the gray button as active on load
+const _initGrayBtn = document.querySelector('.filter-preset-btn[data-filter="gray"]');
+if (_initGrayBtn) {
+    document.querySelectorAll('.filter-preset-btn').forEach(b => b.classList.remove('active-filter'));
+    _initGrayBtn.classList.add('active-filter');
+}
+
+document.querySelectorAll('.filter-preset-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        const filterKey = e.target.getAttribute('data-filter');
+        const filterVal = MAP_FILTERS[filterKey] || 'none';
+        const mapEl = document.getElementById('map');
+        if (mapEl) {
+            mapEl.style.filter = filterVal;
+        }
+        document.querySelectorAll('.filter-preset-btn').forEach(b => b.classList.remove('active-filter'));
+        e.target.classList.add('active-filter');
+        
+        // Update document theme attribute to change side panel style dynamically
+        document.documentElement.setAttribute('data-theme', filterKey);
+    });
+});
+
+speedSlider.addEventListener('input', (e) => {
+    speedValEl.textContent = parseFloat(e.target.value).toFixed(1);
 });
 
 toggleAutoRot.checked = state.isAutoRot;
@@ -136,22 +748,20 @@ toggleNoiseWave.addEventListener('change', (e) => {
     state.isNoiseWave = e.target.checked;
 });
 
-toggleScanline.addEventListener('change', (e) => {
-    state.isScanline = e.target.checked;
-});
+
 
 toggleAircraft.checked = state.showAircraft;
 toggleAircraft.addEventListener('change', (e) => {
     state.showAircraft = e.target.checked;
     // Deselect a hidden aircraft target
-    if (!state.showAircraft && selectedDrone && !selectedDrone.isVessel) selectedDrone = null;
+    if (!state.showAircraft && selectedDrone && !selectedDrone.isVessel) selectDrone(null);
 });
 
 toggleVessels.checked = state.showVessels;
 toggleVessels.addEventListener('change', (e) => {
     state.showVessels = e.target.checked;
     // Deselect a hidden vessel target
-    if (!state.showVessels && selectedDrone && selectedDrone.isVessel) selectedDrone = null;
+    if (!state.showVessels && selectedDrone && selectedDrone.isVessel) selectDrone(null);
 });
 
 toggleDataCenter.checked = state.showDataCenters;
@@ -179,8 +789,62 @@ map.on('move', () => {
     yawValEl.textContent = `${yawDeg}°`;
     pitchValEl.textContent = `${pitch.toFixed(1)}°`;
     zoomValEl.textContent = state.zoom.toFixed(1) + 'x';
-    zoomSlider.value = state.zoom;
 });
+
+// ─── User Interaction Priority ─────────────────────────────────────────────
+// When user touches/drags/zooms the map, immediately pause all auto behaviors.
+// Auto-resume 2 seconds after the user stops interacting.
+let userInteracting = false;
+let userInteractResumeTimer = null;
+
+const USER_RESUME_DELAY = 2000; // ms before auto-resume
+
+function onUserInteractStart(hasOriginalEvent) {
+    if (hasOriginalEvent === false) return; // programmatic event — skip
+    userInteracting = true;
+    state.isFollowing = false;
+    // Cancel any pending resume
+    if (userInteractResumeTimer) {
+        clearTimeout(userInteractResumeTimer);
+        userInteractResumeTimer = null;
+    }
+}
+
+function onUserInteractEnd() {
+    // Schedule auto-resume
+    if (userInteractResumeTimer) clearTimeout(userInteractResumeTimer);
+    userInteractResumeTimer = setTimeout(() => {
+        userInteracting = false;
+        // Re-enable follow if a target is selected
+        if (selectedDrone) {
+            state.isFollowing = true;
+        }
+    }, USER_RESUME_DELAY);
+}
+
+// Pause camera follow when the user manually interacts with the map
+map.on('dragstart',   (e) => onUserInteractStart(!e.originalEvent ? false : true));
+map.on('dragend',     ()  => onUserInteractEnd());
+map.on('zoomstart',   (e) => onUserInteractStart(!!e.originalEvent));
+map.on('zoomend',     ()  => onUserInteractEnd());
+map.on('pitchstart',  (e) => onUserInteractStart(!!e.originalEvent));
+map.on('pitchend',    ()  => onUserInteractEnd());
+map.on('rotatestart', (e) => onUserInteractStart(!!e.originalEvent));
+map.on('rotateend',   ()  => onUserInteractEnd());
+
+// Also capture native touch events on the map canvas for maximum priority
+map.getCanvas().addEventListener('touchstart', () => {
+    onUserInteractStart(true);
+}, { passive: true });
+map.getCanvas().addEventListener('touchend', () => {
+    onUserInteractEnd();
+}, { passive: true });
+map.getCanvas().addEventListener('mousedown', () => {
+    onUserInteractStart(true);
+}, { passive: true });
+map.getCanvas().addEventListener('mouseup', () => {
+    onUserInteractEnd();
+}, { passive: true });
 
 
 // ─── Satellite Tracking (SGP4 via satellite.js) ─────────────────────────────
@@ -503,6 +1167,7 @@ function drawDataCenters(time) {
 
 // Tactical locations (Bases)
 const militaryBases = [
+    { name: "CHEONGJU UNIV HQ", coords: [127.4957, 36.6506], isHQ: true },
     { name: "SEOUL HQ", coords: [127.05, 37.45] },
     { name: "GYERYONGDAE", coords: [127.24, 36.29] },
     { name: "BUSAN NAVAL BASE", coords: [129.09, 35.10] },
@@ -769,6 +1434,112 @@ function isVesselVisibleAtZoom(v, zoom) {
     }
 }
 
+let currentLoadedPhotoReg = null;
+
+function loadAircraftPhoto(drone) {
+    const reg = drone.registration;
+    const model = drone.acType || 'AIRCRAFT';
+    const photoContainer = document.getElementById('tac-photo-container');
+    const photoImg = document.getElementById('tac-photo');
+    const photoModel = document.getElementById('tac-photo-model');
+    const photoPhotographer = document.getElementById('tac-photo-photographer');
+    
+    if (!reg || reg === 'N/A') {
+        if (photoContainer) photoContainer.style.display = 'none';
+        return;
+    }
+    
+    if (currentLoadedPhotoReg === reg) {
+        if (photoContainer) photoContainer.style.display = 'block';
+        return;
+    }
+    
+    currentLoadedPhotoReg = reg;
+    
+    if (photoImg) photoImg.src = '';
+    if (photoModel) photoModel.textContent = model;
+    if (photoPhotographer) photoPhotographer.textContent = 'LOADING...';
+    if (photoContainer) photoContainer.style.display = 'block';
+    
+    fetch(`/api/aircraft-photo?reg=${encodeURIComponent(reg)}`)
+        .then(res => res.json())
+        .then(data => {
+            if (!selectedDrone || selectedDrone.registration !== reg) return;
+            
+            if (data.photos && data.photos.length > 0) {
+                const photo = data.photos[0];
+                const imgSrc = photo.thumbnail_large ? photo.thumbnail_large.src : (photo.thumbnail ? photo.thumbnail.src : '');
+                
+                if (photoImg && imgSrc) {
+                    photoImg.src = imgSrc;
+                }
+                if (photoPhotographer) {
+                    photoPhotographer.textContent = `© ${photo.photographer || 'Planespotters'}`;
+                }
+            } else {
+                if (photoPhotographer) photoPhotographer.textContent = 'NO IMAGE';
+                if (photoContainer) photoContainer.style.display = 'none';
+            }
+        })
+        .catch(err => {
+            console.error('Error fetching aircraft photo:', err);
+            if (photoContainer) photoContainer.style.display = 'none';
+        });
+}
+
+function loadAirlineLogo(drone) {
+    const logoContainer = document.getElementById('tac-airline-container');
+    const logoImg = document.getElementById('tac-airline-logo');
+    
+    if (!drone.id) {
+        if (logoContainer) logoContainer.style.display = 'none';
+        return;
+    }
+    
+    const match = drone.id.match(/^([A-Z]{3})/);
+    const operator = match ? match[1].toUpperCase() : null;
+    
+    if (!operator) {
+        if (logoContainer) logoContainer.style.display = 'none';
+        return;
+    }
+    
+    if (logoImg) {
+        logoImg.src = `https://www.flightaware.com/images/airline_logos/90p/${operator}.png`;
+        logoImg.onerror = () => {
+            if (logoContainer) logoContainer.style.display = 'none';
+        };
+        logoImg.onload = () => {
+            if (selectedDrone && selectedDrone.id === drone.id) {
+                if (logoContainer) logoContainer.style.display = 'flex';
+            }
+        };
+    }
+}
+
+function selectDrone(drone) {
+    selectedDrone = drone;
+    if (drone) {
+        state.isFollowing = true;
+        
+        if (!drone.isVessel) {
+            loadAircraftPhoto(drone);
+            loadAirlineLogo(drone);
+        } else {
+            const photoContainer = document.getElementById('tac-photo-container');
+            if (photoContainer) photoContainer.style.display = 'none';
+            const logoContainer = document.getElementById('tac-airline-container');
+            if (logoContainer) logoContainer.style.display = 'none';
+        }
+    } else {
+        const photoContainer = document.getElementById('tac-photo-container');
+        if (photoContainer) photoContainer.style.display = 'none';
+        const logoContainer = document.getElementById('tac-airline-container');
+        if (logoContainer) logoContainer.style.display = 'none';
+        currentLoadedPhotoReg = null;
+    }
+}
+
 // FPS Tracker
 let lastFrameTime = performance.now();
 let frameCount = 0;
@@ -820,11 +1591,11 @@ window.addEventListener('click', (e) => {
     }
 
     if (clickedObject) {
-        selectedDrone = clickedObject;
+        selectDrone(clickedObject);
     } else {
-        // Only deselect if not clicking control panel
-        if (!e.target.closest('.control-panel') && !e.target.closest('input')) {
-            selectedDrone = null;
+        // Only deselect if not clicking control panel, input fields, or the tactical side panel overlay
+        if (!e.target.closest('.control-panel') && !e.target.closest('input') && !e.target.closest('.tactical-panel-overlay')) {
+            selectDrone(null);
         }
     }
 });
@@ -851,8 +1622,8 @@ function render(time) {
     const dt = lastTime ? (time - lastTime) / 1000 : 0;
     lastTime = time;
 
-    // Auto Rotation simulation
-    if (state.isAutoRot) {
+    // Auto Rotation simulation — suspended while user is interacting
+    if (state.isAutoRot && !userInteracting) {
         let currentBearing = map.getBearing();
         const speed = parseFloat(speedSlider.value);
         map.setBearing(currentBearing + speed * 0.05);
@@ -904,14 +1675,70 @@ function render(time) {
         if (v.path.length > 20) v.path.shift();
     });
 
-    // Update scanline sweep progress
-    if (state.isScanline) {
-        state.scanProgress = (time * 0.0006) % 1.0;
+
+
+    // Auto camera follow — suspended while user is interacting
+    if (state.isFollowing && !userInteracting) {
+        if (selectedDrone) {
+            map.setCenter(selectedDrone.currentCoords);
+        } else if (trackingState.active && trackingState.currentPos) {
+            map.setCenter(trackingState.currentPos);
+        } else if (plotterState.active && plotterState.coords) {
+            map.setCenter(plotterState.coords);
+        }
     }
 
-    // Auto camera follow selected target
-    if (selectedDrone) {
-        map.setCenter(selectedDrone.currentCoords);
+    // Update Cargo Tracking Simulation
+    if (trackingState.active) {
+        if (trackingState.status === 'in_transit' && trackingState.osrmCoords.length > 0) {
+            trackingState.pathProgress += trackingState.speed * dt;
+            if (trackingState.pathProgress >= 1.0) {
+                trackingState.pathProgress = 1.0;
+                
+                // Arrived at next node!
+                const nextIdx = trackingState.activeStageIndex + 1;
+                trackingState.activeStageIndex = nextIdx;
+                trackingState.currentPos = [...trackingState.routeStages[nextIdx].coords];
+                
+                // Add timestamp to arrival log
+                const now = new Date();
+                trackingState.routeStages[nextIdx].time = `${(now.getMonth()+1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+                
+                if (nextIdx === trackingState.routeStages.length - 1) {
+                    // Reached destination!
+                    trackingState.status = 'delivered';
+                    document.getElementById('track-status-summary').textContent = "DELIVERED";
+                    updateTrackingLogUI();
+                } else {
+                    // Stationed at hub
+                    trackingState.status = 'hub_stationed';
+                    trackingState.statusTimer = 4.0; // Wait 4 seconds pulsing
+                    document.getElementById('track-status-summary').textContent = "HUB ARRIVED";
+                    updateTrackingLogUI();
+                }
+            } else if (trackingState.osrmCoords.length > 0) {
+                // Interpolate position along OSRM road route coordinates
+                const len = trackingState.osrmCoords.length;
+                const progressFloat = trackingState.pathProgress * (len - 1);
+                const idx = Math.floor(progressFloat);
+                const nextIdx = Math.min(idx + 1, len - 1);
+                const t = progressFloat - idx;
+                
+                const p1 = trackingState.osrmCoords[idx];
+                const p2 = trackingState.osrmCoords[nextIdx];
+                
+                trackingState.currentPos = [
+                    p1[0] + (p2[0] - p1[0]) * t,
+                    p1[1] + (p2[1] - p1[1]) * t
+                ];
+            }
+        } else if (trackingState.status === 'hub_stationed') {
+            trackingState.statusTimer -= dt;
+            if (trackingState.statusTimer <= 0) {
+                // Start moving to next stage
+                transitionToNextStage();
+            }
+        }
     }
 
     // (Lat/Lon grid lines over South Korea removed per design request)
@@ -934,14 +1761,21 @@ function render(time) {
     drawSatellites(time);
 
     // 5. Draw Military Bases
-    drawBases();
+    drawBases(time);
+
+    // 5b. Draw Tactical Geo-Plotter Target
+    if (plotterState.active) drawPlotterTarget(time);
 
     // 4. Draw Drones and Paths
     if (state.showAircraft) drawDrones(time);
     if (state.showVessels) drawVessels(time);
 
+    // 8. Draw Cargo Tracking overlay
+    if (trackingState.active) drawCargoTracking(time);
+
     // 5. Draw Selected Target details
     const targetPanel = document.getElementById('target-details-panel');
+    const tacPanel = document.getElementById('tactical-right-panel');
     if (selectedDrone) {
         drawTargetDetails(selectedDrone);
         if (targetPanel) {
@@ -987,16 +1821,116 @@ function render(time) {
                     : `${selectedDrone.altitude.toLocaleString()} ft  (${Math.round(selectedDrone.altitude * 0.3048)} m)`;
             }
         }
+
+        // Bind and animate the custom sliding side panel
+        if (tacPanel) {
+            tacPanel.classList.add('active');
+
+            // ID
+            const tacIdEl = document.getElementById('tac-id');
+            if (tacIdEl) tacIdEl.textContent = selectedDrone.id;
+
+            // Classify (Type)
+            const tacTypeEl = document.getElementById('tac-type');
+            if (tacTypeEl) tacTypeEl.textContent = selectedDrone.acType || (selectedDrone.isVessel ? 'VESSEL' : 'AIRCRAFT');
+
+            // Registration / Flag
+            const tacRegEl = document.getElementById('tac-reg');
+            if (tacRegEl) {
+                if (selectedDrone.isVessel) {
+                    tacRegEl.textContent = selectedDrone.flag || selectedDrone.registration || 'N/A';
+                } else {
+                    tacRegEl.textContent = selectedDrone.registration || 'N/A';
+                }
+            }
+
+            // Altitude
+            const tacAltEl = document.getElementById('tac-alt');
+            if (tacAltEl) {
+                if (selectedDrone.isVessel) {
+                    tacAltEl.textContent = selectedDrone.dwt ? `${parseInt(selectedDrone.dwt).toLocaleString()} dwt` : 'N/A';
+                } else {
+                    tacAltEl.textContent = selectedDrone.isGrounded ? 'ON GROUND' : `${selectedDrone.altitude.toLocaleString()} FT`;
+                }
+            }
+
+            // Velocity (Knots)
+            const tacSpeedEl = document.getElementById('tac-speed');
+            if (tacSpeedEl) {
+                let knotsVal = 0;
+                if (selectedDrone.isVessel) {
+                    knotsVal = (selectedDrone.velocity / 0.514444);
+                    tacSpeedEl.textContent = `${knotsVal.toFixed(1)} KT`;
+                } else {
+                    knotsVal = selectedDrone.speedKnots !== undefined ? selectedDrone.speedKnots : (selectedDrone.velocity / 0.514444);
+                    tacSpeedEl.textContent = `${Math.round(knotsVal)} KT`;
+                }
+            }
+
+            // Spec Graphic Icon (Vessel vs Aircraft)
+            const tacIconEl = document.getElementById('tac-icon');
+            if (tacIconEl) {
+                tacIconEl.textContent = selectedDrone.isVessel ? '🚢' : '✈';
+            }
+
+            // Callsign
+            const tacCallsignEl = document.getElementById('tac-callsign');
+            if (tacCallsignEl) tacCallsignEl.textContent = selectedDrone.id;
+
+            // Origin Country or Place
+            const tacOriginEl = document.getElementById('tac-origin');
+            if (tacOriginEl) {
+                if (selectedDrone.isVessel) {
+                    tacOriginEl.textContent = selectedDrone.country || selectedDrone.flag || 'MARITIME';
+                } else {
+                    tacOriginEl.textContent = selectedDrone.origin || 'FLIGHT';
+                }
+            }
+
+            // Route details
+            const tacRouteEl = document.getElementById('tac-route');
+            if (tacRouteEl) {
+                tacRouteEl.textContent = selectedDrone.isVessel 
+                    ? (selectedDrone.dest || 'N/A')
+                    : `${selectedDrone.origin || 'N/A'} > ${selectedDrone.dest || 'N/A'}`;
+            }
+
+            // Coordinates
+            const tacLatEl = document.getElementById('tac-lat');
+            if (tacLatEl) tacLatEl.textContent = `${selectedDrone.currentCoords[1].toFixed(5)}°N`;
+            const tacLonEl = document.getElementById('tac-lon');
+            if (tacLonEl) tacLonEl.textContent = `${selectedDrone.currentCoords[0].toFixed(5)}°E`;
+
+            // Dynamic distance / range from map center
+            const mapCenter = map.getCenter();
+            const dLon = mapCenter.lng;
+            const dLat = mapCenter.lat;
+
+            // Haversine formula to compute distance in km
+            const R = 6371; // earth radius in km
+            const lat1 = selectedDrone.currentCoords[1] * Math.PI / 180;
+            const lat2 = dLat * Math.PI / 180;
+            const deltaLat = (dLat - selectedDrone.currentCoords[1]) * Math.PI / 180;
+            const deltaLon = (dLon - selectedDrone.currentCoords[0]) * Math.PI / 180;
+            const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+                      Math.cos(lat1) * Math.cos(lat2) *
+                      Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            const rangeDist = R * c;
+
+            const tacDistEl = document.getElementById('tac-dist');
+            if (tacDistEl) tacDistEl.textContent = `RNG: ${rangeDist.toFixed(1)} KM`;
+        }
     } else {
         if (targetPanel) {
             targetPanel.style.display = 'none';
         }
+        if (tacPanel) {
+            tacPanel.classList.remove('active');
+        }
     }
 
-    // 6. Draw scan sweep overlay
-    if (state.isScanline) {
-        drawScanSweep();
-    }
+
 
     requestAnimationFrame(render);
 }
@@ -1253,27 +2187,96 @@ function drawAltitudeLayers() {
 
 
 // Draw tactical base locations
-function drawBases() {
+function drawBases(time) {
     ctx.font = '9px "Orbitron", sans-serif';
     ctx.fillStyle = '#ffffff';
+
+    // HQ color follows current map filter theme
+    const theme = document.documentElement.getAttribute('data-theme') || 'gray';
+    const themeColor = {
+        gray:  'rgba(220, 220, 220, 0.95)',
+        cyan:  'rgba(80, 230, 210, 0.95)',
+        green: 'rgba(80, 220, 100, 0.95)',
+        real:  'rgba(220, 220, 220, 0.95)'
+    }[theme] || 'rgba(220, 220, 220, 0.95)';
+
+    const themeColorFaint = {
+        gray:  'rgba(220, 220, 220, 0.5)',
+        cyan:  'rgba(80, 230, 210, 0.5)',
+        green: 'rgba(80, 220, 100, 0.5)',
+        real:  'rgba(220, 220, 220, 0.5)'
+    }[theme] || 'rgba(220, 220, 220, 0.5)';
 
     militaryBases.forEach(base => {
         const screenPos = map.project(base.coords);
         if (screenPos.x < 0 || screenPos.x > canvas.width || screenPos.y < 0 || screenPos.y > canvas.height) return;
 
-        // Draw crosshair symbol
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(screenPos.x, screenPos.y, 4, 0, Math.PI * 2);
-        ctx.moveTo(screenPos.x - 7, screenPos.y);
-        ctx.lineTo(screenPos.x + 7, screenPos.y);
-        ctx.moveTo(screenPos.x, screenPos.y - 7);
-        ctx.lineTo(screenPos.x, screenPos.y + 7);
-        ctx.stroke();
+        ctx.save();
 
-        // Label
-        ctx.fillText(base.name, screenPos.x + 10, screenPos.y + 3);
+        if (base.isHQ) {
+            // ── HQ Marker: static star + solid ring (no pulse) ────────────
+
+            // Outer dashed ring (static)
+            ctx.strokeStyle = themeColorFaint;
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.arc(screenPos.x, screenPos.y, 16, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Inner solid ring
+            ctx.strokeStyle = themeColor;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(screenPos.x, screenPos.y, 7, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // 5-point star
+            ctx.fillStyle = themeColor;
+            ctx.shadowColor = themeColor;
+            ctx.shadowBlur = 6;
+            ctx.beginPath();
+            for (let i = 0; i < 5; i++) {
+                const a  = (i * 4 * Math.PI / 5) - Math.PI / 2;
+                const ai = a + 2 * Math.PI / 5;
+                const ox = screenPos.x + 5 * Math.cos(a);
+                const oy = screenPos.y + 5 * Math.sin(a);
+                const ix = screenPos.x + 2.2 * Math.cos(ai);
+                const iy = screenPos.y + 2.2 * Math.sin(ai);
+                i === 0 ? ctx.moveTo(ox, oy) : ctx.lineTo(ox, oy);
+                ctx.lineTo(ix, iy);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // HQ label
+            ctx.font = 'bold 11px "Courier New", monospace';
+            ctx.fillStyle = themeColor;
+            ctx.shadowColor = 'rgba(0,0,0,0.8)';
+            ctx.shadowBlur = 4;
+            ctx.fillText('◈ ' + base.name, screenPos.x + 17, screenPos.y - 4);
+            ctx.font = '9px "Courier New", monospace';
+            ctx.fillStyle = themeColorFaint;
+            ctx.fillText('청주대학교', screenPos.x + 17, screenPos.y + 8);
+            ctx.shadowBlur = 0;
+
+        } else {
+            // Standard Base Marker: simple crosshair
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 1.0;
+            ctx.beginPath();
+            ctx.arc(screenPos.x, screenPos.y, 4, 0, Math.PI * 2);
+            ctx.moveTo(screenPos.x - 7, screenPos.y);
+            ctx.lineTo(screenPos.x + 7, screenPos.y);
+            ctx.moveTo(screenPos.x, screenPos.y - 7);
+            ctx.lineTo(screenPos.x, screenPos.y + 7);
+            ctx.stroke();
+            ctx.fillText(base.name, screenPos.x + 10, screenPos.y + 3);
+        }
+
+        ctx.restore();
     });
 }
 
@@ -1565,26 +2568,276 @@ function drawTargetDetails(d) {
     }
 }
 
-// Draw linear scan sweep effect
-function drawScanSweep() {
-    const sweepY = canvas.height * state.scanProgress;
+
+
+// Draw manual geocode plotter targeting reticle
+function drawPlotterTarget(time) {
+    if (!plotterState.active || !plotterState.coords) return;
     
-    // Draw scanline gradient
-    const grad = ctx.createLinearGradient(0, sweepY - 100, 0, sweepY + 5);
-    grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    grad.addColorStop(0.95, 'rgba(255, 255, 255, 0.05)');
-    grad.addColorStop(1, 'rgba(255, 255, 255, 0.4)'); // Scan wave front
+    const screenPos = map.project(plotterState.coords);
+    if (screenPos.x < 0 || screenPos.x > canvas.width || screenPos.y < 0 || screenPos.y > canvas.height) return;
 
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, sweepY - 100, canvas.width, 105);
-
-    // Glowing core scan line
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.save();
+    
+    // Pulse factor
+    const pulse = 0.5 + 0.5 * Math.abs(Math.sin(time * 0.0035));
+    
+    // Pulsing outer ring (glowing)
+    ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+    ctx.shadowBlur = 6;
+    ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(0, sweepY);
-    ctx.lineTo(canvas.width, sweepY);
+    ctx.arc(screenPos.x, screenPos.y, 5 + pulse * 5, 0, Math.PI * 2);
     ctx.stroke();
+
+    // Solid inner dot
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(screenPos.x, screenPos.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Text label backed by a clean readable box
+    ctx.save();
+    ctx.font = 'bold 9px "Share Tech Mono", monospace';
+    const labelText = `[TARGET] ${plotterState.name}`;
+    const textW = ctx.measureText(labelText).width;
+    
+    const px = screenPos.x + 12;
+    const py = screenPos.y - 6;
+    
+    // Backing box
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.fillRect(px - 4, py - 8, textW + 8, 12);
+    ctx.strokeRect(px - 4, py - 8, textW + 8, 12);
+    
+    // Text
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(labelText, px, py + 1);
+    ctx.restore();
+}
+
+// Draw cargo shipment tracking route, checkpoints, and vehicle
+function drawCargoTracking(time) {
+    if (!trackingState.active) return;
+    
+    ctx.save();
+    
+    const pulse = 0.6 + 0.4 * Math.abs(Math.sin(time * 0.003));
+    const rotCW = (time * 0.0008) % (Math.PI * 2);
+    
+    // 1. Draw highway route if loaded
+    if (trackingState.osrmCoords && trackingState.osrmCoords.length > 1) {
+        // Find index of current position in road coords to split colors
+        const len = trackingState.osrmCoords.length;
+        const currentIdx = Math.floor(trackingState.pathProgress * (len - 1));
+        
+        // Solid white glowing line for traversed route
+        ctx.beginPath();
+        ctx.lineWidth = 3.0;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.shadowColor = 'rgba(255, 255, 255, 0.6)';
+        ctx.shadowBlur = 6;
+        
+        let first = true;
+        for (let k = 0; k <= currentIdx; k++) {
+            const sp = map.project(trackingState.osrmCoords[k]);
+            if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
+            else { ctx.lineTo(sp.x, sp.y); }
+        }
+        if (trackingState.currentPos) {
+            const spCurr = map.project(trackingState.currentPos);
+            ctx.lineTo(spCurr.x, spCurr.y);
+        }
+        ctx.stroke();
+        
+        // Dashed semi-transparent line for remaining route
+        ctx.beginPath();
+        ctx.lineWidth = 2.0;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.setLineDash([4, 6]);
+        ctx.shadowBlur = 0;
+        
+        if (trackingState.currentPos) {
+            const spCurr = map.project(trackingState.currentPos);
+            ctx.moveTo(spCurr.x, spCurr.y);
+        }
+        for (let k = currentIdx + 1; k < len; k++) {
+            const sp = map.project(trackingState.osrmCoords[k]);
+            ctx.lineTo(sp.x, sp.y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+    
+    // 2. Draw static route segments between checkpoints (for context)
+    ctx.shadowBlur = 0;
+    for (let idx = 0; idx < trackingState.routeStages.length - 1; idx++) {
+        const startSp = map.project(trackingState.routeStages[idx].coords);
+        const endSp = map.project(trackingState.routeStages[idx + 1].coords);
+        
+        ctx.beginPath();
+        ctx.lineWidth = 1.0;
+        ctx.strokeStyle = idx < trackingState.activeStageIndex ? 'rgba(255, 255, 255, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+        ctx.moveTo(startSp.x, startSp.y);
+        ctx.lineTo(endSp.x, endSp.y);
+        ctx.stroke();
+    }
+    
+    // 3. Draw hub nodes/checkpoints
+    trackingState.routeStages.forEach((stage, idx) => {
+        const screenPos = map.project(stage.coords);
+        if (screenPos.x < 0 || screenPos.x > canvas.width || screenPos.y < 0 || screenPos.y > canvas.height) return;
+        
+        const isCurrent = idx === trackingState.activeStageIndex;
+        const isPast = idx < trackingState.activeStageIndex;
+        
+        ctx.save();
+        if (isCurrent) {
+            // Pulsing target hub ring
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(screenPos.x, screenPos.y, 6 + pulse * 6, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Solid center
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(screenPos.x, screenPos.y, 4, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (isPast) {
+            // Completed hub: small solid dot
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.beginPath();
+            ctx.arc(screenPos.x, screenPos.y, 3, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            // Future hub: empty ring
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 1.0;
+            ctx.beginPath();
+            ctx.arc(screenPos.x, screenPos.y, 4, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        
+        // Hub labels
+        ctx.font = '8px "Share Tech Mono", monospace';
+        ctx.fillStyle = isCurrent ? '#ffffff' : 'rgba(255, 255, 255, 0.4)';
+        
+        const label = stage.name.toUpperCase();
+        const lblW = ctx.measureText(label).width;
+        
+        // Draw small label backing
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+        ctx.fillRect(screenPos.x - lblW / 2 - 4, screenPos.y - 18, lblW + 8, 10);
+        ctx.strokeStyle = isCurrent ? 'rgba(255, 255, 255, 0.4)' : 'rgba(255, 255, 255, 0.15)';
+        ctx.strokeRect(screenPos.x - lblW / 2 - 4, screenPos.y - 18, lblW + 8, 10);
+        
+        ctx.fillStyle = isCurrent ? '#ffffff' : 'rgba(255, 255, 255, 0.55)';
+        ctx.fillText(label, screenPos.x - lblW / 2, screenPos.y - 10);
+        ctx.restore();
+    });
+    
+    // 4. Draw carrier/vehicle at currentPos
+    if (trackingState.currentPos) {
+        const vehiclePos = map.project(trackingState.currentPos);
+        if (vehiclePos.x >= 0 && vehiclePos.x <= canvas.width && vehiclePos.y >= 0 && vehiclePos.y <= canvas.height) {
+            ctx.save();
+            ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+            ctx.shadowBlur = 8;
+            
+            // Rotating brackets around vehicle
+            ctx.save();
+            ctx.translate(vehiclePos.x, vehiclePos.y);
+            ctx.rotate(rotCW);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            const vs = 8 + pulse * 2;
+            ctx.beginPath();
+            // Left Bracket
+            ctx.moveTo(-vs + 3, -vs); ctx.lineTo(-vs, -vs); ctx.lineTo(-vs, vs); ctx.lineTo(-vs + 3, vs);
+            // Right Bracket
+            ctx.moveTo(vs - 3, -vs); ctx.lineTo(vs, -vs); ctx.lineTo(vs, vs); ctx.lineTo(vs - 3, vs);
+            ctx.stroke();
+            ctx.restore();
+            
+            // Pulsing dot
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(vehiclePos.x, vehiclePos.y, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore(); // restore shadow
+            
+            // 5. Draw vehicle HUD panel
+            ctx.save();
+            ctx.font = 'bold 9px "Share Tech Mono", monospace';
+            
+            const vLine1 = `CARRIER: ${trackingState.courier.toUpperCase()}`;
+            const vLine2 = `INVOICE: ${trackingState.invoice}`;
+            const vLine3 = `STATUS: ${trackingState.status.toUpperCase().replace('_', ' ')}`;
+            const vLine4 = `POS: ${trackingState.currentPos[1].toFixed(4)}°N, ${trackingState.currentPos[0].toFixed(4)}°E`;
+            
+            const w1 = ctx.measureText(vLine1).width;
+            const w2 = ctx.measureText(vLine2).width;
+            const w3 = ctx.measureText(vLine3).width;
+            const w4 = ctx.measureText(vLine4).width;
+            
+            const panelW = Math.max(w1, w2, w3, w4) + 16;
+            const panelH = 50;
+            
+            const px = vehiclePos.x + 18;
+            const py = vehiclePos.y - 25;
+            
+            // Leader line
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(vehiclePos.x + 5, vehiclePos.y);
+            ctx.lineTo(px, py + 8);
+            ctx.lineTo(px + 5, py + 8);
+            ctx.stroke();
+            
+            // Panel background & outline
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.lineWidth = 1.0;
+            ctx.beginPath();
+            ctx.rect(px, py, panelW, panelH);
+            ctx.fill();
+            ctx.stroke();
+            
+            // Corners ticks
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.2;
+            const ts = 3;
+            // Top-left
+            ctx.beginPath(); ctx.moveTo(px, py + ts); ctx.lineTo(px, py); ctx.lineTo(px + ts, py); ctx.stroke();
+            // Top-right
+            ctx.beginPath(); ctx.moveTo(px + panelW, py + ts); ctx.lineTo(px + panelW, py); ctx.lineTo(px + panelW - ts, py); ctx.stroke();
+            // Bottom-left
+            ctx.beginPath(); ctx.moveTo(px, py + panelH - ts); ctx.lineTo(px, py + panelH); ctx.lineTo(px + ts, py + panelH); ctx.stroke();
+            // Bottom-right
+            ctx.beginPath(); ctx.moveTo(px + panelW, py + panelH - ts); ctx.lineTo(px + panelW, py + panelH); ctx.lineTo(px + panelW - ts, py + panelH); ctx.stroke();
+            
+            // Draw texts
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(vLine1, px + 8, py + 12);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.fillText(vLine2, px + 8, py + 22);
+            ctx.fillText(vLine3, px + 8, py + 32);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.fillText(vLine4, px + 8, py + 42);
+            
+            ctx.restore();
+        }
+    }
+    
+    ctx.restore();
 }
 
 // Hide the basemap's text/symbol (label) layers — city/road/place names.

@@ -30,22 +30,31 @@
             <div class="panel-section">
                 <h2>MAP CONTROLS</h2>
                 
-                <div class="control-group">
-                    <label for="height-scale">ELEVATION (고도 배율)</label>
-                    <input type="range" id="height-scale" min="0" max="150" value="60" step="1">
-                    <span class="val-display" id="height-val">60</span>
-                </div>
 
-                <div class="control-group">
-                    <label for="grid-resolution">RESOLUTION (격자 밀도)</label>
-                    <input type="range" id="grid-resolution" min="10" max="40" value="25" step="1">
-                    <span class="val-display" id="res-val">25 x 25</span>
-                </div>
 
                 <div class="control-group">
                     <label for="camera-zoom">ZOOM (확대)</label>
-                    <input type="range" id="camera-zoom" min="0.5" max="3.0" value="1.2" step="0.1">
-                    <span class="val-display" id="zoom-val">1.2x</span>
+                    <input type="range" id="camera-zoom" min="2" max="18" value="7.0" step="0.1">
+                    <span class="val-display" id="zoom-val">7.0x</span>
+                </div>
+
+                <div class="control-group">
+                    <label>ZOOM PRESETS (줌 단축 버튼)</label>
+                    <div class="input-row" style="gap: 5px;">
+                        <button class="hud-btn zoom-preset-btn" data-zoom="17.4" style="flex: 1; padding: 5px 0; font-size: 0.7rem; font-family: var(--font-mono);">17.4x</button>
+                        <button class="hud-btn zoom-preset-btn" data-zoom="10.0" style="flex: 1; padding: 5px 0; font-size: 0.7rem; font-family: var(--font-mono);">10.0x</button>
+                        <button class="hud-btn zoom-preset-btn" data-zoom="6.0" style="flex: 1; padding: 5px 0; font-size: 0.7rem; font-family: var(--font-mono);">6.0x</button>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>MAP THEME FILTERS (지도 색상 필터)</label>
+                    <div class="input-row" style="gap: 5px; flex-wrap: wrap;">
+                        <button class="hud-btn filter-preset-btn" data-filter="gray" style="flex: 1; min-width: 60px; padding: 5px 0; font-size: 0.65rem; font-family: var(--font-mono);">흑백</button>
+                        <button class="hud-btn filter-preset-btn" data-filter="cyan" style="flex: 1; min-width: 60px; padding: 5px 0; font-size: 0.65rem; font-family: var(--font-mono);">연청록</button>
+                        <button class="hud-btn filter-preset-btn active-filter" data-filter="green" style="flex: 1; min-width: 60px; padding: 5px 0; font-size: 0.65rem; font-family: var(--font-mono);">초록</button>
+                        <button class="hud-btn filter-preset-btn" data-filter="real" style="flex: 1; min-width: 60px; padding: 5px 0; font-size: 0.65rem; font-family: var(--font-mono);">실제지도</button>
+                    </div>
                 </div>
 
                 <div class="control-group">
@@ -75,14 +84,6 @@
 
                 <div class="toggle-group">
                     <label class="toggle-switch">
-                        <input type="checkbox" id="toggle-scanline" checked>
-                        <span class="slider"></span>
-                    </label>
-                    <span>RADAR SCAN (선형 레이더 스윕)</span>
-                </div>
-
-                <div class="toggle-group">
-                    <label class="toggle-switch">
                         <input type="checkbox" id="toggle-aircraft" checked>
                         <span class="slider"></span>
                     </label>
@@ -99,7 +100,7 @@
 
                 <div class="toggle-group">
                     <label class="toggle-switch">
-                        <input type="checkbox" id="toggle-datacenter" checked>
+                        <input type="checkbox" id="toggle-datacenter">
                         <span class="slider"></span>
                     </label>
                     <span>DATA CENTER NET (데이터센터망)</span>
@@ -107,10 +108,55 @@
 
                 <div class="toggle-group">
                     <label class="toggle-switch">
-                        <input type="checkbox" id="toggle-sattrack" checked>
+                        <input type="checkbox" id="toggle-sattrack">
                         <span class="slider"></span>
                     </label>
                     <span>SATELLITE TRACKS (위성 궤적선)</span>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>CARGO TRACKING (택배 경로 추적)</h2>
+                <div class="control-group">
+                    <label for="courier-select">COURIER SERVICE (택배사)</label>
+                    <select id="courier-select" class="hud-select">
+                        <option value="cj">CJ Logistics (CJ대한통운)</option>
+                        <option value="coupang">Coupang (쿠팡 로지스틱스)</option>
+                        <option value="hanjin">Hanjin Express (한진택배)</option>
+                        <option value="lotte">Lotte Global Logistics (롯데택배)</option>
+                        <option value="post">Korea Post (우체국택배)</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label for="tracking-input">TRACKING INVOICE (송장번호 입력)</label>
+                    <div class="input-row">
+                        <input type="text" id="tracking-input" class="hud-input" placeholder="ENTER INVOICE NO." value="38294710582">
+                        <button id="track-btn" class="hud-btn">TRACK</button>
+                    </div>
+                </div>
+
+                <div id="tracking-status-panel" style="display: none; margin-top: 5px; flex-direction: column; gap: 8px;">
+                    <div class="telemetry-row"><span class="cyan-text" id="track-status-header">CARGO STATUS</span><span id="track-status-summary">INIT</span></div>
+                    <div id="tracking-log" class="tracking-log-container">
+                        <!-- Log lines will be inserted here -->
+                    </div>
+                    <button id="track-cancel-btn" class="hud-btn hud-btn-danger" style="width: 100%;">ABORT TRACKING</button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>TACTICAL GEO-PLOTTER (좌표 표적 지정)</h2>
+                <div class="control-group">
+                    <label for="geocode-input">TARGET LOCATION/ADDRESS (위치 및 주소)</label>
+                    <div class="input-row">
+                        <input type="text" id="geocode-input" class="hud-input" placeholder="ENTER ADDRESS OR PLACE" value="독도">
+                        <button id="geocode-btn" class="hud-btn">PLOT TARGET</button>
+                    </div>
+                </div>
+                <div id="plotter-status-panel" style="display: none; margin-top: 5px; flex-direction: column; gap: 8px;">
+                    <div class="telemetry-row"><span class="cyan-text" id="plotter-status-header">TARGET LOCKED</span><span id="plotter-target-name">INIT</span></div>
+                    <div class="telemetry-row"><span>COORDINATES</span><span id="plotter-coords">0.0, 0.0</span></div>
+                    <button id="plotter-clear-btn" class="hud-btn hud-btn-danger" style="width: 100%;">RELEASE TARGET</button>
                 </div>
             </div>
 
@@ -140,6 +186,156 @@
         <button id="panel-toggle" class="panel-toggle-btn" aria-label="Toggle Panel">◀</button>
 
 
+    </div>
+
+    <!-- Large Detailed Target Popup Modal -->
+    <div id="target-popup" class="target-popup-overlay">
+        <div class="target-popup-content">
+            <div class="popup-header">
+                <div class="popup-title-group">
+                    <span class="popup-subtitle" id="popup-target-category">AIR TARGET SPECIFICATION</span>
+                    <h1 class="popup-title" id="popup-target-callsign">-</h1>
+                </div>
+                <button class="popup-close-btn" id="popup-close-btn" aria-label="Close details">×</button>
+            </div>
+            
+            <div class="popup-body">
+                <div class="popup-badge" id="popup-status-badge">TRACKING ACTIVE</div>
+                
+                <div class="popup-grid">
+                    <div class="popup-info-card">
+                        <span class="info-label" id="popup-label-type">AIRCRAFT TYPE</span>
+                        <span class="info-value" id="popup-val-type">-</span>
+                    </div>
+                    <div class="popup-info-card">
+                        <span class="info-label" id="popup-label-reg">REGISTRATION</span>
+                        <span class="info-value" id="popup-val-reg">-</span>
+                    </div>
+                    <div class="popup-info-card">
+                        <span class="info-label" id="popup-label-route">FLIGHT ROUTE</span>
+                        <span class="info-value" id="popup-val-route">-</span>
+                    </div>
+                    <div class="popup-info-card">
+                        <span class="info-label" id="popup-label-alt">CURRENT ALTITUDE</span>
+                        <span class="info-value" id="popup-val-alt">-</span>
+                    </div>
+                    <div class="popup-info-card">
+                        <span class="info-label" id="popup-label-speed">VELOCITY / SPEED</span>
+                        <span class="info-value" id="popup-val-speed">-</span>
+                    </div>
+                    <div class="popup-info-card">
+                        <span class="info-label">COORDINATES</span>
+                        <span class="info-value" id="popup-val-coords">-</span>
+                    </div>
+                </div>
+                
+                <!-- Dynamic radar signal graphic inside the popup for aesthetics -->
+                <div class="popup-radar-graphic">
+                    <div class="radar-circle circle-1"></div>
+                    <div class="radar-circle circle-2"></div>
+                    <div class="radar-circle circle-3"></div>
+                    <div class="radar-line"></div>
+                    <div class="radar-signal-status">TELEMETRY LINK STATUS: SECURE (100% SIGNAL)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right-side sliding tactical telemetry panel (Image-matching design) -->
+    <div id="tactical-right-panel" class="tactical-panel-overlay">
+        <div class="tactical-row">
+            <!-- Left Part: Tracking details -->
+            <div class="tactical-card card-tracking">
+                <div class="orange-tick"></div>
+                <div class="card-header">
+                    <span class="header-title">TRACKING COORDINATES</span>
+                </div>
+                <div class="card-body">
+                    <div class="telemetry-grid">
+                        <div class="telemetry-item"><span class="label">TARGET ID</span><span class="val cyan-text" id="tac-id">-</span></div>
+                        <div class="telemetry-item"><span class="label">CLASSIFY</span><span class="val" id="tac-type">-</span></div>
+                        <div class="telemetry-item"><span class="label">REGISTR.</span><span class="val" id="tac-reg">-</span></div>
+                        <div class="telemetry-item"><span class="label">ALTITUDE</span><span class="val" id="tac-alt">-</span></div>
+                        <div class="telemetry-item"><span class="label">VELOCITY</span><span class="val" id="tac-speed">-</span></div>
+                    </div>
+                    
+                    <!-- Aircraft photo display -->
+                    <div class="tac-photo-card" id="tac-photo-container">
+                        <img id="tac-photo" src="" alt="Aircraft Photo" />
+                        <div class="photo-scanline"></div>
+                        <div class="photo-label" id="tac-photo-model">AIRCRAFT</div>
+                        <div class="photo-credits" id="tac-photo-photographer">© Planespotters</div>
+                    </div>
+                    
+                    <!-- Mini radar maps/grid vectors -->
+                    <div class="hud-grids-container">
+                        <div class="hud-grid-box">
+                            <div class="grid-line-sweeper"></div>
+                            <div class="hud-grid-points">
+                                <span class="point active" style="top:25%; left:30%;"></span>
+                                <span class="point" style="top:60%; left:70%;"></span>
+                            </div>
+                            <span class="grid-label">GRID-A1</span>
+                        </div>
+                        <div class="hud-grid-box">
+                            <div class="grid-line-sweeper" style="animation-delay: -1.5s;"></div>
+                            <div class="hud-grid-points">
+                                <span class="point" style="top:40%; left:20%;"></span>
+                                <span class="point active" style="top:50%; left:60%;"></span>
+                            </div>
+                            <span class="grid-label">GRID-B2</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Part: Spec/Status with circular graphic -->
+            <div class="tactical-card card-spec">
+                <div class="orange-tick"></div>
+                <!-- Airline logo display -->
+                <div class="tac-airline-container" id="tac-airline-container">
+                    <img id="tac-airline-logo" src="" alt="Airline Logo" />
+                </div>
+                <div class="spec-circle-container">
+                    <div class="rotating-ring ring-outer"></div>
+                    <div class="rotating-ring ring-inner"></div>
+                    <div class="spec-icon" id="tac-icon">✈</div>
+                </div>
+                <div class="spec-details">
+                    <h3 id="tac-callsign">CALLSIGN</h3>
+                    <p class="subtitle" id="tac-origin">ORIGIN</p>
+                    <div class="spec-status green-glow">LINK ACTIVE</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bottom Part: Wide Unit Found details -->
+        <div class="tactical-card card-search-units">
+            <div class="orange-tick"></div>
+            <div class="card-header">
+                <span class="header-title">SEARCHING UNITS</span>
+                <span class="header-right-status blinking">UNIT FOUND!</span>
+            </div>
+            <div class="card-body searching-body">
+                <div class="searching-left">
+                    <div class="telemetry-item"><span class="label">ROUTE</span><span class="val" id="tac-route">-</span></div>
+                    <div class="telemetry-item"><span class="label">LATITUDE</span><span class="val cyan-text" id="tac-lat">-</span></div>
+                    <div class="telemetry-item"><span class="label">LONGITUDE</span><span class="val cyan-text" id="tac-lon">-</span></div>
+                    <div class="telemetry-item"><span class="label">TRACKING</span><span class="val orange-text">AUTO-LOCK</span></div>
+                </div>
+                
+                <div class="searching-right">
+                    <div class="dial-container">
+                        <div class="dial-rotating"></div>
+                        <div class="dial-center">2A</div>
+                    </div>
+                    <span class="dial-label" id="tac-dist">SYS OK</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Close panel button -->
+        <button class="hud-btn hud-btn-danger" id="tactical-close-btn" style="width: 100%; font-family: var(--font-mono); font-size: 0.75rem;">RELEASE TELEMETRY LINK</button>
     </div>
 
     <!-- satellite.js: SGP4/SDP4 orbital mechanics for real satellite tracking -->
